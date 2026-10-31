@@ -17,8 +17,11 @@ EXPERIMENT = yaml.safe_load(Path("configs/experiment.yaml").read_text())
 HOURLY = Path("data/processed/airport_hourly.parquet")
 REQUESTS = Path("data/processed/prediction_requests.parquet")
 ARTIFACTS = Path("artifacts")
+# Tracked in git: a claim outlives a crash and reaches other worktrees once pushed.
+LOCKED_LEDGER = Path("reports/locked_runs")
 
 TARGET = EXPERIMENT["targets"]["throughput"]
+TARGET_LABEL = "arrival throughput (AAR proxy)"
 TASK = "airport_throughput"
 UNIT = "touchdowns/hour"
 VERSION = "baseline-v1"
@@ -34,6 +37,11 @@ SIMULATED_FEED = "simulated_feed"
 # BTS holds the schedule as flown.
 RETROSPECTIVE_SCHEDULE = "retrospective_schedule"
 
+# Persistence assumes the last complete hour is known at T, which flatters it.
+FEED_LATENCY_H = 0
+SOURCE_PATHS = ("src", "configs", "pyproject.toml", "uv.lock")
+
+DATA_MODES = {"real", "fixture"}
 STATUSES = {"available", "degraded", "unavailable"}
 REQUEST_COLUMNS = [
     "prediction_id",
@@ -262,6 +270,21 @@ def check_inputs(
         raise ValueError(
             f"horizon_h != target - as_of for {wrong['prediction_id'].iloc[0]}"
         )
+    wrong = requests[~requests["horizon_h"].isin(EXPERIMENT["horizons_h"])]
+    if len(wrong):
+        raise ValueError(
+            f"horizon_h outside {EXPERIMENT['horizons_h']} "
+            f"for {wrong['prediction_id'].iloc[0]}"
+        )
+    airport = requests[requests["task"].eq(TASK)]
+    target = airport["target_start_utc"]
+    wrong = airport[
+        target.ne(target.dt.floor("h")) | airport["target_end_utc"].ne(target + HOUR)
+    ]
+    if len(wrong):
+        raise ValueError(
+            f"target is not one whole UTC hour for {wrong['prediction_id'].iloc[0]}"
+        )
 
 
 def check_predictions(predictions: pd.DataFrame) -> None:
@@ -288,6 +311,8 @@ def baseline_predictions(
     scored = pd.concat(
         [in_split(airport_requests, s, "target_start_utc") for s in splits]
     )
+    # At the start of validation, T can precede the fit cutoff the fits rely on.
+    scored = scored[scored["as_of_utc"].ge(split_bounds("train")[1])]
     if scored.empty:
         raise ValueError(f"no {TASK} requests in {splits}")
     train = observed(in_split(hourly, "train", "hour_start_utc"))
@@ -314,10 +339,33 @@ def write_predictions(predictions: pd.DataFrame, path: Path) -> None:
     part.replace(path)
 
 
-def _git(*args: str) -> str:
+def git(*args: str) -> str:
     return subprocess.run(
         ["git", *args], capture_output=True, text=True, check=True
     ).stdout.strip()
+
+
+def source_dirty() -> bool:
+    return bool(git("status", "--porcelain", "--", *SOURCE_PATHS))
+
+
+def claim_locked_run(
+    name: str, approved_by: str, commit: str, ledger: Path = LOCKED_LEDGER
+) -> None:
+    ledger.mkdir(parents=True, exist_ok=True)
+    claim = {
+        "run": name,
+        "approved_by": approved_by,
+        "commit": commit,
+        "claimed_at_utc": datetime.now(UTC).isoformat(),
+    }
+    try:
+        with open(ledger / f"{name}.json", "x") as file:
+            json.dump(claim, file, indent=2)
+    except FileExistsError as error:
+        raise FileExistsError(
+            f"{name} was claimed in {ledger}; the locked test runs once"
+        ) from error
 
 
 def main(
@@ -325,30 +373,47 @@ def main(
     requests_path: Path = REQUESTS,
     artifacts: Path = ARTIFACTS,
     locked_test: bool = False,
+    approved_by: str | None = None,
+    ledger: Path = LOCKED_LEDGER,
 ) -> Path:
     run_id = "baselines_locked_test" if locked_test else "baselines_dev"
     path = artifacts / run_id / "predictions.parquet"
-    if locked_test and path.exists():
-        raise FileExistsError(f"{path} exists; the locked test runs once")
-    commit_dirty = bool(_git("status", "--porcelain", "--", "src", "configs"))
+    commit, commit_dirty = git("rev-parse", "HEAD"), source_dirty()
+    if locked_test and not approved_by:
+        raise ValueError("locked test needs approved_by, after the model is frozen")
     if locked_test and commit_dirty:
-        raise ValueError("locked test needs src and configs committed")
+        raise ValueError(f"locked test needs {SOURCE_PATHS} committed")
+    # Hashed before the read, because worktrees share data/.
+    hourly_sha256, requests_sha256 = sha256(hourly_path), sha256(requests_path)
+    if "data_mode" not in pq.read_schema(hourly_path).names:
+        raise ValueError("airport_hourly needs a data_mode column of real or fixture")
     test_start, _ = split_bounds("test")
     # Dev runs never load 2025 outcomes (docs/WORK_PLAN.md test-set rule).
     filters = None if locked_test else [("hour_start_utc", "<", test_start)]
-    hourly = pd.read_parquet(hourly_path, filters=filters)
+    # These columns hold no outcomes, so a bad run is refused before it is claimed.
+    context = pd.read_parquet(
+        hourly_path,
+        columns=["source_snapshot_id", "data_mode", "schedule_knowledge_basis"],
+        filters=filters,
+    )
     requests = pd.read_parquet(requests_path)
-    snapshots = hourly["source_snapshot_id"].unique()
+    snapshots = context["source_snapshot_id"].unique()
     if len(snapshots) != 1:
         raise ValueError(f"expected one airport_hourly snapshot, found {snapshots}")
-    if "data_mode" not in hourly:
-        raise ValueError("airport_hourly needs a data_mode column of real or fixture")
-    modes = set(hourly["data_mode"]) | set(requests["data_mode"])
+    modes = set(context["data_mode"]) | set(requests["data_mode"])
     if len(modes) != 1:
         raise ValueError(f"mixed data_mode {sorted(modes)}")
     data_mode = modes.pop()
+    if data_mode not in DATA_MODES:
+        raise ValueError(f"data_mode {data_mode} outside {DATA_MODES}")
     if locked_test and data_mode != "real":
         raise ValueError(f"locked test needs real data, got {data_mode}")
+    schedule_bases = context["schedule_knowledge_basis"].unique()
+    if len(schedule_bases) != 1 or pd.isna(schedule_bases[0]):
+        raise ValueError(f"expected one schedule basis, found {schedule_bases}")
+    if locked_test:
+        claim_locked_run(run_id, approved_by, commit, ledger)
+    hourly = pd.read_parquet(hourly_path, filters=filters)
     predictions, schedule_fit = baseline_predictions(hourly, requests, locked_test)
     predictions = predictions.assign(
         data_snapshot_id=str(snapshots[0]), generated_at_utc=datetime.now(UTC)
@@ -359,12 +424,18 @@ def main(
         "producer": "airbus_challenge.baselines",
         "producer_version": VERSION,
         "schema_version": SCHEMA_VERSION,
-        "commit": _git("rev-parse", "HEAD"),
+        "commit": commit,
         "commit_dirty": commit_dirty,
+        "approved_by": approved_by,
         "data_mode": data_mode,
         "data_snapshot_id": str(snapshots[0]),
-        "airport_hourly_sha256": sha256(hourly_path),
-        "prediction_requests_sha256": sha256(requests_path),
+        "target": TARGET,
+        "target_label": TARGET_LABEL,
+        "airport_hourly_sha256": hourly_sha256,
+        "prediction_requests_sha256": requests_sha256,
+        "uv_lock_sha256": sha256(Path("uv.lock")),
+        "schedule_knowledge_basis": str(schedule_bases[0]),
+        "feed_latency_h": FEED_LATENCY_H,
         "fit_split": EXPERIMENT["splits"]["train"],
         "fit_cutoff_utc": split_bounds("train")[1].isoformat(),
         "fit_availability": "simulated: train outcomes are treated as known at the "
@@ -376,9 +447,11 @@ def main(
         "rows": len(predictions),
         "status_counts": counts.to_dict("index"),
     }
-    manifest_text = json.dumps(manifest, indent=2, default=int)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.with_name("manifest.json").write_text(
+        json.dumps(manifest, indent=2, default=int)
+    )
     write_predictions(predictions, path)
-    path.with_name("manifest.json").write_text(manifest_text)
     print(path, f"data_mode={data_mode}")
     print(counts)
     return path
@@ -387,4 +460,6 @@ def main(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--locked-test", action="store_true")
-    main(locked_test=parser.parse_args().locked_test)
+    parser.add_argument("--approved-by")
+    args = parser.parse_args()
+    main(locked_test=args.locked_test, approved_by=args.approved_by)
