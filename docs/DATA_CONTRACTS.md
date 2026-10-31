@@ -118,6 +118,8 @@ Generate a complete UTC hour grid, not just hours with records. Use zero only wh
 Required columns:
 `prediction_id`, `task`, `airport_icao`, `flight_id?`, `as_of_utc`, `target_start_utc`, `target_end_utc`, `horizon_h`, `schedule_snapshot_id?`, `cohort_version`, `data_mode`.
 
+A request is in scope for a split, task and `cohort_version` when its target falls in that split and `as_of_utc` is at or after the training fit cutoff. Results are never pooled across cohorts. The CSV-only comparison and each leave-one-airport-out test use their own `cohort_version`.
+
 For flights, `target_start_utc` is the scheduled departure instant and `target_end_utc` is null. For airport tasks, it is the target hour and end is start + 1 hour. `horizon_h` must equal the target-start/as-of difference in hours.
 
 `feature_snapshots` has the same key plus typed feature columns, `feature_version`, `data_snapshot_id`, `status`, `reason_codes`, and source-age fields. The feature registry specifies type, unit, source, transform, missing policy, and serving support for each feature. It is frozen with the model.
@@ -147,7 +149,7 @@ Fields: `prediction_id`, `target_kind`, `y_true` (nullable float64), `eligible` 
 
 `exclusion_reason` is null exactly when `eligible` is true. Otherwise it is one of `cancelled`, `coverage_incomplete`, `missing_outcome`, `quarantined`.
 
-Every prediction request in scope has a label row for each target it is scored on, including excluded ones, so denominators stay visible.
+Every prediction request in scope has a label row for each target it is scored on, including excluded ones, so denominators stay visible. A table holds one `label_version`.
 
 Allowed main targets: `official_aar`, `reporting_carrier_touchdowns`, `throughput_over_clear_weather_p95`, `departure_delay_gt45`, `cancellation`. Binary outcomes must be exactly 0 or 1. Labels are outcomes, never features.
 
@@ -160,6 +162,8 @@ Fields: request keys, `target_kind`, `estimate` (nullable float64), `p10`, `p90`
 
 - Regression estimate is the declared point estimator; classification estimate is a probability in [0,1].
 - `p10/p90` are regression predictive quantiles, not classification confidence intervals. Enforce p10 <= p90; fix crossing with a documented method. A mean estimate need not mathematically lie between those quantiles.
+- A model writes a row for every request in scope. A request it cannot score is `unavailable`, never omitted.
+- `artifacts/<run_id>/manifest.json` records at least `run_id`, `data_mode` and `commit_dirty`.
 - Unavailable means null estimate and a nonempty reason list. Degraded means an actually validated fallback or model capability, not a random imputation.
 - Baselines use the same schema with their own model IDs.
 - Explanations use a companion table: prediction/model key, feature, feature value, contribution, contribution scale, explanation method. Probabilistic log-odds contributions are labelled as such.

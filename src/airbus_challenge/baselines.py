@@ -255,6 +255,9 @@ def check_inputs(
         raise ValueError(
             f"duplicate airport hour {row['airport_icao']} {row['hour_start_utc']}"
         )
+    hours = hourly["hour_start_utc"]
+    if hours.ne(hours.dt.floor("h")).any():
+        raise ValueError("hour grid must start on the hour")
     span = hourly.groupby("airport_icao")["hour_start_utc"].agg(["min", "max", "size"])
     gaps = span[(span["max"] - span["min"]) / HOUR + 1 != span["size"]]
     if len(gaps):
@@ -264,6 +267,8 @@ def check_inputs(
         raise ValueError(
             f"hour grid must span {start} to {end} for {short.index.tolist()}"
         )
+    if requests["prediction_id"].duplicated().any():
+        raise ValueError("duplicate prediction_id in requests")
     horizon = (requests["target_start_utc"] - requests["as_of_utc"]) / HOUR
     wrong = requests[horizon != requests["horizon_h"]]
     if len(wrong):
@@ -285,6 +290,9 @@ def check_inputs(
         raise ValueError(
             f"target is not one whole UTC hour for {wrong['prediction_id'].iloc[0]}"
         )
+    unknown = set(airport["airport_icao"]) - set(hourly["airport_icao"])
+    if unknown:
+        raise ValueError(f"requests for airports without an hour grid: {unknown}")
 
 
 def check_predictions(predictions: pd.DataFrame) -> None:
@@ -300,9 +308,9 @@ def check_predictions(predictions: pd.DataFrame) -> None:
         raise ValueError("unavailable prediction without a reason")
 
 
-def baseline_predictions(
-    hourly: pd.DataFrame, requests: pd.DataFrame, locked_test: bool = False
-) -> tuple[pd.DataFrame, dict]:
+def scored_requests(
+    hourly: pd.DataFrame, requests: pd.DataFrame, locked_test: bool
+) -> pd.DataFrame:
     splits = ["test"] if locked_test else ["validation", "calibration"]
     check_inputs(
         hourly, requests, split_bounds("train")[0], split_bounds(splits[-1])[1]
@@ -315,6 +323,13 @@ def baseline_predictions(
     scored = scored[scored["as_of_utc"].ge(split_bounds("train")[1])]
     if scored.empty:
         raise ValueError(f"no {TASK} requests in {splits}")
+    return scored
+
+
+def baseline_predictions(
+    hourly: pd.DataFrame, requests: pd.DataFrame, locked_test: bool = False
+) -> tuple[pd.DataFrame, dict]:
+    scored = scored_requests(hourly, requests, locked_test)
     train = observed(in_split(hourly, "train", "hour_start_utc"))
     schedule_fit = fit_schedule(train)
     return pd.concat(
@@ -393,7 +408,13 @@ def main(
     # These columns hold no outcomes, so a bad run is refused before it is claimed.
     context = pd.read_parquet(
         hourly_path,
-        columns=["source_snapshot_id", "data_mode", "schedule_knowledge_basis"],
+        columns=[
+            "airport_icao",
+            "hour_start_utc",
+            "source_snapshot_id",
+            "data_mode",
+            "schedule_knowledge_basis",
+        ],
         filters=filters,
     )
     requests = pd.read_parquet(requests_path)
@@ -411,6 +432,7 @@ def main(
     schedule_bases = context["schedule_knowledge_basis"].unique()
     if len(schedule_bases) != 1 or pd.isna(schedule_bases[0]):
         raise ValueError(f"expected one schedule basis, found {schedule_bases}")
+    scored_requests(context, requests, locked_test)
     if locked_test:
         claim_locked_run(run_id, approved_by, commit, ledger)
     hourly = pd.read_parquet(hourly_path, filters=filters)
@@ -447,11 +469,10 @@ def main(
         "rows": len(predictions),
         "status_counts": counts.to_dict("index"),
     }
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.with_name("manifest.json").write_text(
-        json.dumps(manifest, indent=2, default=int)
-    )
     write_predictions(predictions, path)
+    part = path.with_name("manifest.json.part")
+    part.write_text(json.dumps(manifest, indent=2, default=int))
+    part.replace(path.with_name("manifest.json"))
     print(path, f"data_mode={data_mode}")
     print(counts)
     return path

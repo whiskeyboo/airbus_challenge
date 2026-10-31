@@ -16,6 +16,7 @@ from airbus_challenge.evaluate import (
     CAPACITY_RATIO,
     CLIMATOLOGY,
     DAY_OFFSET,
+    LOCKED_EXPERIMENTS,
     MIN_CI_DAYS,
     PERSISTENCE,
     REQUEST_KEYS,
@@ -28,8 +29,10 @@ from airbus_challenge.evaluate import (
     _mean,
     _rmse_skill,
     availability_basis,
+    baseline_support,
     check_baselines,
     check_contract,
+    check_label_keys,
     check_locked_candidates,
     check_requests,
     classification_metrics,
@@ -43,6 +46,7 @@ from airbus_challenge.evaluate import (
     regression_metrics,
     reliability,
     skill_metrics,
+    squared_errors,
     worst_misses,
 )
 
@@ -332,9 +336,12 @@ def test_skill_ci_keeps_rows_on_their_own_days():
     ids = dict(zip(table["prediction_id"].unique(), [f"{i:04d}" for i in order]))
     table["prediction_id"] = table["prediction_id"].map(ids)
     rows = scored(table, labels_for(table, [0.0] * n))
+    squared = squared_errors(rows)
+    days_by_id = rows.drop_duplicates("prediction_id").set_index("prediction_id")["day"]
+    support = baseline_support(squared, MODEL)
     metric = next(
         m
-        for m in skill_metrics(rows, MODEL, False)
+        for m in skill_metrics(support, days_by_id, MODEL, False)
         if m["metric"] == f"skill_vs_{PERSISTENCE}"
     )
     model_rows = rows[rows["model_version"].eq(MODEL)].sort_values("prediction_id")
@@ -410,8 +417,13 @@ def test_a_model_with_no_estimates_reports_every_metric_as_null(kind, unit, name
         "horizon": 3,
         "slice": "common_support",
     }
-    for name, expected_unit in {**names, f"skill_vs_{PERSISTENCE}": "share"}.items():
+    skill = {**common, "slice": "baseline_support"}
+    for name, expected_unit in names.items():
         row = record(records, metric=name, **common)
+        assert (row["value"], row["unit"]) == (None, expected_unit)
+        assert row["reason"] == "no_predicted_rows"
+    for name, expected_unit in {f"skill_vs_{PERSISTENCE}": "share"}.items():
+        row = record(records, metric=name, **skill)
         assert (row["value"], row["unit"]) == (None, expected_unit)
         assert row["reason"] == "no_predicted_rows"
 
@@ -759,13 +771,15 @@ def test_requests_outside_the_scored_scope_are_not_expected():
     [
         (lambda d: d.drop(index=0), "no label"),
         (lambda d: d.assign(unit="arrivals"), "unit"),
+        (lambda d: pd.concat([d, d]), "more than one label"),
+        (lambda d: d.assign(label_version=["a", "b"]), "one label_version"),
     ],
 )
-def test_broken_labels_fail_loudly(change, message):
+def test_broken_label_keys_fail_loudly(tmp_path, change, message):
     table = throughput_table()
-    labels = change(labels_for(table, [10.0, 20.0]))
+    path = write_labels(change(labels_for(table, [10.0, 20.0])), tmp_path)
     with pytest.raises(ValueError, match=message):
-        join_labels(table, labels)
+        check_label_keys(path, table)
 
 
 def write_labels(labels: pd.DataFrame, tmp_path) -> str:
@@ -779,7 +793,6 @@ def write_labels(labels: pd.DataFrame, tmp_path) -> str:
     [
         (lambda d: d.assign(y_true=2.0), "exactly 0 or 1"),
         (lambda d: d.assign(y_true=np.nan), "without an outcome"),
-        (lambda d: pd.concat([d, d]), "more than one label"),
         (lambda d: d.assign(exclusion_reason="cancelled"), "null exactly when"),
         (
             lambda d: d.assign(eligible=False, exclusion_reason=None),
@@ -875,7 +888,7 @@ def test_a_model_and_baselines_must_share_a_row():
         [DAY_ONE, DAY_TWO],
         {MODEL: [1.0, np.nan], PERSISTENCE: [np.nan, 1.0], CLIMATOLOGY: [1.0, 1.0]},
     )
-    with pytest.raises(ValueError, match="shared by every model"):
+    with pytest.raises(ValueError, match="shares no row"):
         check_baselines(table.assign(split="validation"))
 
 
@@ -895,7 +908,11 @@ def write_run(table: pd.DataFrame, root, run: str = "run", dirty: bool = False) 
         table.drop(columns=["split", "day"], errors="ignore"),
         root / run / "predictions.parquet",
     )
-    manifest = {"data_mode": table["data_mode"].iloc[0], "commit_dirty": dirty}
+    manifest = {
+        "run_id": run,
+        "data_mode": table["data_mode"].iloc[0],
+        "commit_dirty": dirty,
+    }
     (root / run / "manifest.json").write_text(json.dumps(manifest))
 
 
@@ -946,7 +963,8 @@ def test_fixture_run_never_writes_the_reported_metrics(tmp_path, clean_git):
     assert len(report["uv_lock_sha256"]) == 64
     assert report["split_bounds"]["validation"][0] == "2024-01-01T00:00:00Z"
     assert report["target_labels"][TARGET] == "arrival throughput (AAR proxy)"
-    assert (reports / "fixture" / "figures" / f"rmse_{TARGET}_validation.png").exists()
+    figures = reports / "fixture" / "figures"
+    assert (figures / f"rmse_{TARGET}_validation_fixture-v0.png").exists()
 
 
 @pytest.mark.parametrize(
@@ -978,9 +996,9 @@ def test_fixture_run_never_writes_the_reported_metrics(tmp_path, clean_git):
 def test_main_runs_every_check_before_scoring(tmp_path, clean_git, change, message):
     table = throughput_table()
     labels = labels_for(table, [10.0, 20.0])
-    requests = requests_of(table)
     changed, changed_labels = change(table, labels)
     inputs = run_inputs(changed, changed_labels, tmp_path)
+    requests = requests_of(table).assign(data_mode=changed["data_mode"].iloc[0])
     requests.to_parquet(inputs[1])
     with pytest.raises(ValueError, match=message):
         main(["run"], *inputs)
@@ -1018,9 +1036,7 @@ def test_locked_run_claims_then_writes_once(tmp_path, clean_git):
     path = locked_run(inputs)
     assert path.name == "metrics.json"
     assert json.loads(path.read_text())["approved_by"] == "tester"
-    claim = json.loads(
-        (inputs[-1] / "locked_runs/evaluate_locked_test.json").read_text()
-    )
+    claim = json.loads((inputs[-1] / "locked_runs/evaluate_primary.json").read_text())
     assert claim["approved_by"] == "tester"
     written = path.read_bytes()
     with pytest.raises(FileExistsError, match="runs once"):
@@ -1103,8 +1119,10 @@ def test_every_target_needs_a_candidate():
 @pytest.mark.parametrize(
     ("manifest", "message"),
     [
-        ({"data_mode": "fixture", "commit_dirty": False}, "needs real data"),
-        ({"data_mode": "real", "commit_dirty": True}, "uncommitted"),
+        ({"run_id": "run", "data_mode": "fixture", "commit_dirty": False}, "real data"),
+        ({"run_id": "run", "data_mode": "real", "commit_dirty": True}, "uncommitted"),
+        ({"run_id": "run", "data_mode": "real", "commit_dirty": None}, "uncommitted"),
+        ({"run_id": "other", "data_mode": "real", "commit_dirty": False}, "belongs to"),
     ],
 )
 def test_locked_run_reads_each_run_manifest(tmp_path, clean_git, manifest, message):
@@ -1189,3 +1207,297 @@ def test_baseline_run_scores_end_to_end_on_the_fixture(hourly, tmp_path, clean_g
     assert rmse["ci_reason"] == "not_resampled"
     assert report["availability_basis"][PERSISTENCE] == [SIMULATED_FEED]
     assert report["worst_misses"] == []
+
+
+# Findings pinned from the re-audit
+
+
+def test_a_stray_outcome_column_cannot_override_labels(tmp_path):
+    table = throughput_table().assign(y_true=0.0)
+    (tmp_path / "run").mkdir()
+    table.to_parquet(tmp_path / "run" / "predictions.parquet")
+    with pytest.raises(ValueError, match="y_true"):
+        load_predictions(tmp_path, ["run"], False)
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        (lambda d: d.assign(estimate=np.inf), "finite"),
+        (lambda d: d.assign(reason_codes=None), "reason_codes"),
+    ],
+)
+def test_unscorable_values_are_refused_on_read(change, message):
+    with pytest.raises(ValueError, match=message):
+        check_contract(change(throughput_table()))
+
+
+@pytest.mark.parametrize(
+    "column", ["airport_icao", "as_of_utc", "horizon_h", "task", "cohort_version"]
+)
+def test_every_request_field_must_match(column):
+    table = throughput_table().assign(split="validation")
+    requests = requests_of(table)
+    replacement = ts("2024-03-01") if column == "as_of_utc" else None
+    values = {
+        "airport_icao": "KDFW",
+        "horizon_h": 6,
+        "task": "other",
+        "cohort_version": "other",
+    }
+    requests[column] = replacement if column == "as_of_utc" else values[column]
+    with pytest.raises(ValueError, match="no matching request"):
+        check_requests(table, requests)
+
+
+def test_a_duplicate_request_id_is_refused():
+    table = throughput_table().assign(split="validation")
+    requests = pd.concat([requests_of(table), requests_of(table).iloc[[0]]])
+    with pytest.raises(ValueError, match="duplicate prediction_id"):
+        check_requests(table, requests)
+
+
+def test_scope_keeps_other_tasks_and_cohorts_apart():
+    table = throughput_table().assign(split="validation")
+    other = requests_of(predictions_for("KDFW", [DAY_ONE], {MODEL: [1.0]}))
+    extra = pd.concat(
+        [other.assign(task="other_task"), other.assign(cohort_version="csv_only_v1")],
+        ignore_index=True,
+    ).assign(prediction_id=lambda d: "other-" + d.index.astype(str))
+    check_requests(table, pd.concat([requests_of(table), extra], ignore_index=True))
+
+
+def test_labels_are_checked_after_requests_in_a_dev_run(
+    tmp_path, clean_git, monkeypatch
+):
+    table = throughput_table()
+    inputs = run_inputs(table, labels_for(table, [10.0, 20.0]), tmp_path)
+    requests_of(table).iloc[1:].to_parquet(inputs[1])
+
+    def never(*args):
+        raise AssertionError("labels were read before the requests check")
+
+    monkeypatch.setattr(evaluate, "load_labels", never)
+    with pytest.raises(ValueError, match="no matching request"):
+        main(["run"], *inputs)
+
+
+@pytest.mark.parametrize(
+    "breakage",
+    [
+        lambda t, y, r: (t.iloc[1:], y, r),
+        lambda t, y, r: (t[t["model_version"].ne(CLIMATOLOGY)], y, r),
+        lambda t, y, r: (t, y.assign(unit="arrivals"), r),
+        lambda t, y, r: (t, pd.concat([y, y]), r),
+        lambda t, y, r: (t, y.iloc[:0], r),
+        lambda t, y, r: (t.assign(data_snapshot_id=t["model_version"]), y, r),
+        lambda t, y, r: (t, y, r.assign(data_mode="fixture")),
+    ],
+    ids=["dropped", "baseline", "unit", "duplicate", "missing", "snapshot", "requests"],
+)
+def test_input_defects_never_spend_the_locked_run(tmp_path, clean_git, breakage):
+    table = real_test_table()
+    labels = labels_for(table, [10.0], data_mode="real")
+    changed, changed_labels, requests = breakage(table, labels, requests_of(table))
+    inputs = run_inputs(changed, changed_labels, tmp_path)
+    requests.to_parquet(inputs[1])
+    with pytest.raises(ValueError):
+        locked_run(inputs)
+    assert_nothing_happened(inputs)
+
+
+def test_labels_load_only_after_the_claim(tmp_path, clean_git, monkeypatch):
+    inputs = locked_inputs(tmp_path)
+    claim = inputs[-1] / "locked_runs" / "evaluate_primary.json"
+    load = evaluate.load_labels
+    seen = []
+
+    def spy(*args):
+        seen.append(claim.exists())
+        return load(*args)
+
+    monkeypatch.setattr(evaluate, "load_labels", spy)
+    locked_run(inputs)
+    assert seen == [True]
+
+
+def test_every_run_manifest_is_read(tmp_path, clean_git):
+    table = real_test_table()
+    inputs = locked_inputs(tmp_path, table[table["model_version"].eq(MODEL)])
+    baseline_rows = table[table["model_version"].ne(MODEL)]
+    write_run(baseline_rows, inputs[2], "baselines", dirty=True)
+    with pytest.raises(ValueError, match="uncommitted"):
+        locked_run(inputs, runs=("run", "baselines"))
+    assert_nothing_happened(inputs)
+
+
+def test_a_candidate_with_nothing_usable_cannot_spend_the_run(tmp_path, clean_git):
+    table = real_test_table()
+    empty = table["model_version"].eq(MODEL)
+    table.loc[empty, "estimate"] = np.nan
+    table.loc[empty, "status"] = "unavailable"
+    inputs = locked_inputs(tmp_path, table)
+    with pytest.raises(ValueError, match="no usable estimate"):
+        locked_run(inputs)
+    assert_nothing_happened(inputs)
+
+
+def test_a_candidate_must_cover_every_cell():
+    frames = [
+        real_test_table(),
+        predictions_for(
+            "KDFW",
+            [TEST_DAY],
+            {MODEL: [np.nan], PERSISTENCE: [1.0], CLIMATOLOGY: [1.0]},
+        ).assign(data_mode="real"),
+    ]
+    table = pd.concat(frames, ignore_index=True).assign(split="test")
+    with pytest.raises(ValueError, match="no usable estimate"):
+        check_locked_candidates(table)
+
+
+def test_each_declared_experiment_runs_once_and_writes_apart(tmp_path, clean_git):
+    assert {"primary", "csv_only", "leave_out_KATL"} <= set(LOCKED_EXPERIMENTS)
+    inputs = locked_inputs(tmp_path)
+    run = {"locked_test": True, "approved_by": "tester"}
+    main(["run"], *inputs, **run)
+    path = main(["run"], *inputs, **run, experiment="csv_only")
+    assert path.name == "metrics_csv_only.json"
+    assert json.loads(path.read_text())["experiment"] == "csv_only"
+    with pytest.raises(FileExistsError, match="runs once"):
+        main(["run"], *inputs, **run, experiment="csv_only")
+
+
+def test_an_undeclared_experiment_is_refused(tmp_path, clean_git):
+    inputs = locked_inputs(tmp_path)
+    with pytest.raises(ValueError, match="experiment outside"):
+        main(["run"], *inputs, experiment="primary_retry")
+
+
+def two_cohorts() -> pd.DataFrame:
+    full = throughput_table()
+    subset = full.assign(
+        cohort_version="csv_only_v1",
+        prediction_id=full["prediction_id"] + "|csv",
+        estimate=full["estimate"] + 1,
+    )
+    return pd.concat([full, subset], ignore_index=True)
+
+
+def test_cohorts_never_share_a_cell(tmp_path, clean_git):
+    table = two_cohorts()
+    inputs = run_inputs(table, labels_for(table, [10.0, 20.0] * 2), tmp_path)
+    report = json.loads(main(["run"], *inputs).read_text())
+    assert report["cohorts"] == ["csv_only_v1", "fixture-v0"]
+    match = {
+        "metric": "mae",
+        "model": MODEL,
+        "airport": "KATL",
+        "horizon": 3,
+        "slice": "own_support",
+    }
+    assert value(report["metrics"], cohort="fixture-v0", **match) == pytest.approx(1.5)
+    assert value(report["metrics"], cohort="csv_only_v1", **match) == pytest.approx(2.5)
+
+
+def test_a_run_can_be_restricted_to_one_cohort(tmp_path, clean_git):
+    table = two_cohorts()
+    inputs = run_inputs(table, labels_for(table, [10.0, 20.0] * 2), tmp_path)
+    path = main(["run"], *inputs, cohorts=["csv_only_v1"], experiment="csv_only")
+    assert path.name == "metrics_dev_csv_only.json"
+    assert json.loads(path.read_text())["cohorts"] == ["csv_only_v1"]
+
+
+def test_per_airport_candidates_get_skill_in_their_own_cells():
+    frames = [
+        predictions_for(
+            "KATL",
+            [DAY_ONE],
+            {
+                MODEL: [12.0],
+                OTHER_MODEL: [np.nan],
+                PERSISTENCE: [14.0],
+                CLIMATOLOGY: [9.0],
+            },
+        ),
+        predictions_for(
+            "KDFW",
+            [DAY_ONE],
+            {
+                MODEL: [np.nan],
+                OTHER_MODEL: [12.0],
+                PERSISTENCE: [14.0],
+                CLIMATOLOGY: [9.0],
+            },
+        ),
+    ]
+    table = pd.concat(frames, ignore_index=True).assign(split="validation")
+    check_baselines(table)
+    records = records_of(table, labels_for(table, [10.0, 10.0]))
+    for model, airport in [(MODEL, "KATL"), (OTHER_MODEL, "KDFW")]:
+        skill = value(
+            records,
+            metric=f"skill_vs_{PERSISTENCE}",
+            model=model,
+            airport=airport,
+            horizon=3,
+        )
+        assert skill == pytest.approx(0.5)
+
+
+def test_an_empty_optional_baseline_does_not_block_a_cell():
+    table = predictions_for(
+        "KATL",
+        [DAY_ONE],
+        {
+            MODEL: [1.0],
+            PERSISTENCE: [1.0],
+            CLIMATOLOGY: [1.0],
+            "baseline_schedule_v1": [np.nan],
+        },
+    )
+    check_baselines(table.assign(split="validation"))
+
+
+def test_a_lookalike_baseline_name_counts_as_a_candidate():
+    table = predictions_for("KATL", [DAY_ONE], {"baseline_mine_v1": [1.0]})
+    with pytest.raises(ValueError, match="needs baselines"):
+        check_baselines(table.assign(split="validation"))
+
+
+def test_colours_cover_more_candidates_than_the_palette():
+    models = [f"model_{i}" for i in range(5)]
+    assert set(_colours(models)) == set(models)
+
+
+def test_a_single_airport_run_reports_macro_as_null():
+    table = throughput_table()
+    records = records_of(table, labels_for(table, [10.0, 20.0]))
+    row = record(
+        macro_records(records),
+        metric="mae",
+        model=MODEL,
+        horizon=3,
+        slice="own_support",
+    )
+    assert (row["value"], row["reason"]) == (None, "undefined_for_an_airport")
+
+
+def test_inputs_are_hashed_before_they_are_read(tmp_path, clean_git, monkeypatch):
+    table = throughput_table()
+    inputs = run_inputs(table, labels_for(table, [10.0, 20.0]), tmp_path)
+    events = []
+    hash_file, load = evaluate.sha256, evaluate.load_predictions
+
+    def spy_hash(path):
+        events.append("hash")
+        return hash_file(path)
+
+    def spy_load(*args):
+        events.append("load")
+        return load(*args)
+
+    monkeypatch.setattr(evaluate, "sha256", spy_hash)
+    monkeypatch.setattr(evaluate, "load_predictions", spy_load)
+    main(["run"], *inputs)
+    assert events.index("hash") < events.index("load")

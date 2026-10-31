@@ -491,9 +491,87 @@ def test_refused_inputs_never_claim_the_locked_run(
     assert not (tmp_path / "locked_runs").exists()
 
 
-def test_locked_main_writes_nothing_if_the_manifest_fails(
-    hourly, tmp_path, monkeypatch
+def real_inputs(hourly, tmp_path):
+    hourly["data_mode"] = "real"
+    requests = _sample_requests().assign(data_mode="real")
+    return write_inputs(hourly, requests, tmp_path), requests
+
+
+def test_outcomes_load_only_after_the_claim(hourly, tmp_path, clean_git, monkeypatch):
+    inputs, _ = real_inputs(hourly, tmp_path)
+    claim = tmp_path / "locked_runs" / "baselines_locked_test.json"
+    read, seen = pd.read_parquet, []
+
+    def spy(path, columns=None, **kwargs):
+        if path == inputs[0] and (columns is None or TARGET in columns):
+            seen.append(claim.exists())
+        return read(path, columns=columns, **kwargs)
+
+    monkeypatch.setattr(baselines.pd, "read_parquet", spy)
+    main(*inputs, tmp_path / "artifacts", **locked_args(tmp_path))
+    assert seen == [True]
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        (lambda h, r: (h.drop(index=100), r), "hour grid has gaps"),
+        (lambda h, r: (pd.concat([h, h.iloc[[0]]]), r), "duplicate airport hour"),
+        (lambda h, r: (h, r.assign(horizon_h=4)), "horizon_h"),
+        (lambda h, r: (h, r.assign(task="other")), "no airport_throughput"),
+        (lambda h, r: (h, pd.concat([r, r.iloc[[0]]])), "duplicate prediction_id"),
+    ],
+    ids=["gap", "duplicate_hour", "horizon", "no_requests", "duplicate_request"],
+)
+def test_input_defects_never_spend_the_locked_run(
+    hourly, tmp_path, clean_git, change, message
 ):
+    hourly["data_mode"] = "real"
+    requests = _sample_requests().assign(data_mode="real")
+    inputs = write_inputs(*change(hourly, requests), tmp_path)
+    with pytest.raises(ValueError, match=message):
+        main(*inputs, tmp_path / "artifacts", **locked_args(tmp_path))
+    assert not (tmp_path / "locked_runs").exists()
+
+
+def test_inputs_are_hashed_before_they_are_read(
+    hourly, tmp_path, clean_git, monkeypatch
+):
+    inputs = write_inputs(hourly, _sample_requests(), tmp_path)
+    events, hash_file, read = [], baselines.sha256, pd.read_parquet
+
+    def spy_hash(path):
+        events.append("hash")
+        return hash_file(path)
+
+    def spy_read(*args, **kwargs):
+        events.append("read")
+        return read(*args, **kwargs)
+
+    monkeypatch.setattr(baselines, "sha256", spy_hash)
+    monkeypatch.setattr(baselines.pd, "read_parquet", spy_read)
+    main(*inputs, tmp_path / "artifacts")
+    assert events[:3] == ["hash", "hash", "read"]
+
+
+def test_a_failed_manifest_leaves_no_partial_file(
+    hourly, tmp_path, clean_git, monkeypatch
+):
+    inputs = write_inputs(hourly, _sample_requests(), tmp_path)
+
+    def crash(*args, **kwargs):
+        raise OSError("disk full")
+
+    path = main(*inputs, tmp_path / "artifacts")
+    manifest = path.with_name("manifest.json")
+    before = manifest.read_bytes()
+    monkeypatch.setattr(baselines.Path, "replace", crash)
+    with pytest.raises(OSError, match="disk full"):
+        main(*inputs, tmp_path / "artifacts")
+    assert manifest.read_bytes() == before
+
+
+def test_a_git_failure_is_refused_before_the_claim(hourly, tmp_path, monkeypatch):
     hourly["data_mode"] = "real"
     requests = _sample_requests().assign(data_mode="real")
     inputs = write_inputs(hourly, requests, tmp_path)
@@ -652,6 +730,32 @@ def test_invalid_predictions_are_never_written(tmp_path):
     with pytest.raises(ValueError, match="status outside"):
         baselines.write_predictions(predictions, path)
     assert not path.exists()
+
+
+def test_duplicate_request_id_is_rejected(hourly):
+    requests = make_requests("KATL", [ts(UTC_TIME)], [3])
+    with pytest.raises(ValueError, match="duplicate prediction_id"):
+        baseline_predictions(hourly, pd.concat([requests, requests]))
+
+
+def test_request_airport_needs_an_hour_grid(hourly):
+    requests = pd.concat(
+        [
+            make_requests("KATL", [ts(UTC_TIME)], [3]),
+            make_requests("KJFK", [ts(UTC_TIME)], [3]),
+        ],
+        ignore_index=True,
+    )
+    with pytest.raises(ValueError, match="without an hour grid"):
+        baseline_predictions(hourly, requests)
+
+
+def test_hour_grid_must_start_on_the_hour(hourly):
+    shifted = hourly.assign(
+        hour_start_utc=hourly["hour_start_utc"] + pd.Timedelta(minutes=30)
+    )
+    with pytest.raises(ValueError, match="start on the hour"):
+        baseline_predictions(shifted, make_requests("KATL", [ts(UTC_TIME)], [3]))
 
 
 def test_duplicate_airport_hour_is_rejected(hourly):

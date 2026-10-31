@@ -1,7 +1,7 @@
 import argparse
 import json
 from datetime import UTC, datetime
-from itertools import product
+from itertools import cycle, product
 from pathlib import Path
 
 import matplotlib
@@ -14,9 +14,11 @@ import pyarrow.parquet as pq
 from sklearn.metrics import average_precision_score, precision_recall_curve
 
 from airbus_challenge.baselines import (
+    AIRPORTS,
     ARTIFACTS,
     DATA_MODES,
     EXPERIMENT,
+    PREDICTION_SCHEMA,
     REQUESTS,
     RETROSPECTIVE_SCHEDULE,
     SIMULATED_FEED,
@@ -60,7 +62,12 @@ REQUEST_KEYS = [
     "as_of_utc",
     "target_start_utc",
     "horizon_h",
+    "cohort_version",
+    "data_mode",
 ]
+LABEL_KEYS = ["prediction_id", "target_kind", "unit", "label_version"]
+# Each has one locked run. Anything else on the test split is exploratory.
+LOCKED_EXPERIMENTS = ["primary", "csv_only", *(f"leave_out_{i}" for i in AIRPORTS)]
 METRIC_DEFINITIONS = {
     "average_precision": "sklearn.metrics.average_precision_score, step-wise",
     "recall_at_precision": (
@@ -68,13 +75,19 @@ METRIC_DEFINITIONS = {
         "point: its threshold is not frozen in advance"
     ),
     "pooled": "rows weighted equally: by flight for flight tasks, by airport-hour "
-    "for airport tasks, so airport tasks are not volume-weighted",
-    "macro": "unweighted mean of the airport values, null unless all are defined",
-    "common_support": "rows where every model in the run gave an estimate",
+    "for airport tasks, so airport tasks are not volume-weighted. At horizon all, "
+    "each target counts once per horizon",
+    "macro": "unweighted mean over every configured airport, null unless all are "
+    "defined",
+    "common_support": "rows where every model active in the cell gave an estimate",
+    "baseline_support": "rows the model and both required baselines all scored; "
+    "skill is measured only here",
     "operational_day": "24 h from 08:00 UTC, near the overnight traffic trough",
 }
 
 SPLITS = ("validation", "calibration", "test")
+SCOPE = ["split", "cohort_version", "target_kind"]
+CELL = [*SCOPE, "airport_icao", "horizon_h"]
 POOLED = "pooled"
 MACRO = "macro"
 ALL_HORIZONS = "all"
@@ -105,7 +118,7 @@ GRID = "#e6e5e1"
 
 
 def is_baseline(models: pd.Series) -> pd.Series:
-    return models.str.startswith("baseline_")
+    return models.isin(BASELINE_COLOURS)
 
 
 def split_of(targets: pd.Series) -> pd.Series:
@@ -117,12 +130,23 @@ def split_of(targets: pd.Series) -> pd.Series:
 
 
 def load_predictions(
-    artifacts: Path, runs: list[str], locked_test: bool
+    artifacts: Path,
+    runs: list[str],
+    locked_test: bool,
+    cohorts: list[str] | None = None,
 ) -> pd.DataFrame:
     predictions = pd.concat(
         [pd.read_parquet(artifacts / r / "predictions.parquet") for r in runs],
         ignore_index=True,
     )
+    # A stray y_true or eligible column would otherwise override the labels.
+    extra = set(predictions) - set(PREDICTION_SCHEMA.names)
+    if extra:
+        raise ValueError(f"predictions must not carry {sorted(extra)}")
+    if cohorts:
+        predictions = predictions[predictions["cohort_version"].isin(cohorts)]
+        if predictions.empty:
+            raise ValueError(f"no predictions for cohorts {cohorts}")
     check_predictions(predictions)
     predictions["split"] = split_of(predictions["target_start_utc"])
     if predictions["split"].isna().any():
@@ -134,6 +158,10 @@ def load_predictions(
 
 
 def check_contract(predictions: pd.DataFrame) -> None:
+    if np.isinf(predictions["estimate"]).any():
+        raise ValueError("estimate must be finite")
+    if predictions["reason_codes"].isna().any():
+        raise ValueError("reason_codes must not be null")
     binary = predictions["target_kind"].isin(BINARY)
     if not predictions.loc[binary, "estimate"].dropna().between(0, 1).all():
         raise ValueError("probability outside [0, 1]")
@@ -144,6 +172,8 @@ def check_contract(predictions: pd.DataFrame) -> None:
 
 
 def check_requests(predictions: pd.DataFrame, requests: pd.DataFrame) -> None:
+    if requests["prediction_id"].duplicated().any():
+        raise ValueError("duplicate prediction_id in requests")
     # Labels carry no time, so requests vouch for each id's target and split.
     rows = predictions[REQUEST_KEYS].drop_duplicates()
     matched = rows.merge(requests[REQUEST_KEYS], how="left", indicator=True)
@@ -153,9 +183,13 @@ def check_requests(predictions: pd.DataFrame, requests: pd.DataFrame) -> None:
     fit_cutoff = split_bounds("train")[1]
     expected = requests[requests["as_of_utc"].ge(fit_cutoff)]
     expected = expected.assign(split=split_of(expected["target_start_utc"]))
-    keys = ["split", "target_kind", "model_version"]
-    for (split, target, model), frame in predictions.groupby(keys):
-        scope = expected["task"].eq(frame["task"].iloc[0]) & expected["split"].eq(split)
+    keys = ["split", "task", "cohort_version", "target_kind", "model_version"]
+    for (split, task, cohort, target, model), frame in predictions.groupby(keys):
+        scope = (
+            expected["split"].eq(split)
+            & expected["task"].eq(task)
+            & expected["cohort_version"].eq(cohort)
+        )
         wanted = expected.loc[scope.fillna(False), "prediction_id"]
         absent = wanted[~wanted.isin(frame["prediction_id"])]
         if len(absent):
@@ -167,33 +201,44 @@ def check_requests(predictions: pd.DataFrame, requests: pd.DataFrame) -> None:
 
 def check_baselines(predictions: pd.DataFrame) -> None:
     usable = predictions[predictions["estimate"].notna()]
-    n_models = predictions.groupby("target_kind")["model_version"].nunique()
-    cells = ["split", "target_kind", "airport_icao", "horizon_h"]
-    for cell, frame in usable.groupby(cells):
-        if is_baseline(frame["model_version"]).all():
+    for cell, frame in usable.groupby(CELL):
+        ids = frame.groupby("model_version")["prediction_id"].agg(set)
+        candidates = ids[~is_baseline(ids.index.to_series())]
+        if candidates.empty:
             continue
-        missing = set(REQUIRED_BASELINES) - set(frame["model_version"])
+        missing = set(REQUIRED_BASELINES) - set(ids.index)
         if missing:
             raise ValueError(f"{cell}: a model needs baselines {sorted(missing)}")
-        shared = frame.groupby("prediction_id")["model_version"].nunique()
-        if shared.max() < n_models[cell[1]]:
-            raise ValueError(f"{cell}: no row is shared by every model")
+        shared = ids[PERSISTENCE] & ids[CLIMATOLOGY]
+        for model, rows in candidates.items():
+            if not rows & shared:
+                raise ValueError(f"{cell}: {model} shares no row with both baselines")
 
 
 def check_locked_candidates(predictions: pd.DataFrame) -> None:
     candidates = predictions[~is_baseline(predictions["model_version"])]
-    per_target = candidates.groupby("target_kind")["model_version"].nunique()
-    targets = set(predictions["target_kind"])
+    scope = ["cohort_version", "target_kind"]
+    per_target = candidates.groupby(scope)["model_version"].nunique()
+    targets = set(predictions[scope].itertuples(index=False, name=None))
     if set(per_target.index) != targets or per_target.ne(1).any():
-        raise ValueError(f"locked test needs one frozen model per target in {targets}")
+        raise ValueError(f"locked test needs one frozen model for each of {targets}")
+    # A candidate that scores nothing would spend the run on an all-null report.
+    cells = predictions[CELL].drop_duplicates()
+    usable = candidates[candidates["estimate"].notna()][CELL].drop_duplicates()
+    empty = cells.merge(usable, how="left", indicator=True)
+    empty = empty[empty["_merge"].ne("both")]
+    if len(empty):
+        raise ValueError(f"no usable estimate in {empty[CELL].iloc[0].to_dict()}")
 
 
 def check_run_manifests(artifacts: Path, runs: list[str]) -> None:
     for run in runs:
         manifest = json.loads((artifacts / run / "manifest.json").read_text())
+        if manifest["run_id"] != run:
+            raise ValueError(f"{run}: manifest belongs to {manifest['run_id']}")
         if manifest["data_mode"] != "real":
             raise ValueError(f"{run}: locked test needs real data")
-        if manifest["commit_dirty"]:
+        if manifest["commit_dirty"] is not False:
             raise ValueError(f"{run}: built from uncommitted code")
 
 
@@ -204,6 +249,32 @@ def labels_data_mode(path: Path) -> str:
     if len(modes) != 1:
         raise ValueError(f"mixed labels data_mode {sorted(modes)}")
     return modes[0]
+
+
+def check_label_keys(path: Path, predictions: pd.DataFrame) -> None:
+    # Outcome-free columns only, so broken labels are refused before a locked claim.
+    ids = predictions["prediction_id"].unique().tolist()
+    keys = pd.read_parquet(
+        path, columns=LABEL_KEYS, filters=[("prediction_id", "in", ids)]
+    )
+    if keys["label_version"].nunique() > 1:
+        raise ValueError("labels must hold one label_version")
+    key = ["prediction_id", "target_kind"]
+    if keys.duplicated(key).any():
+        raise ValueError("more than one label for a prediction and target")
+    joined = predictions[[*key, "unit"]].merge(
+        keys, on=key, how="left", suffixes=("", "_label"), indicator=True
+    )
+    unlabelled = joined[joined["_merge"].ne("both")]
+    if len(unlabelled):
+        raise ValueError(f"no label for {unlabelled['prediction_id'].iloc[0]}")
+    mismatch = joined[joined["unit"].ne(joined["unit_label"])]
+    if len(mismatch):
+        row = mismatch.iloc[0]
+        raise ValueError(
+            f"{row['target_kind']}: prediction unit {row['unit']} "
+            f"!= label unit {row['unit_label']}"
+        )
 
 
 def load_labels(path: Path, prediction_ids: list[str]) -> pd.DataFrame:
@@ -219,29 +290,15 @@ def load_labels(path: Path, prediction_ids: list[str]) -> pd.DataFrame:
     binary = labels["target_kind"].isin(BINARY) & labels["eligible"]
     if not labels.loc[binary, "y_true"].isin([0, 1]).all():
         raise ValueError("binary labels must be exactly 0 or 1")
-    if labels.duplicated(["prediction_id", "target_kind"]).any():
-        raise ValueError("more than one label for a prediction and target")
     return labels
 
 
 def join_labels(predictions: pd.DataFrame, labels: pd.DataFrame) -> pd.DataFrame:
     key = ["prediction_id", "target_kind"]
-    columns = [*key, "y_true", "eligible", "exclusion_reason", "unit"]
-    joined = predictions.merge(
-        labels[columns], on=key, how="left", suffixes=("", "_label"), indicator=True
-    )
-    unlabelled = joined[joined["_merge"].ne("both")]
-    if len(unlabelled):
-        raise ValueError(f"no label for {unlabelled['prediction_id'].iloc[0]}")
-    mismatch = joined[joined["unit"].ne(joined["unit_label"])]
-    if len(mismatch):
-        row = mismatch.iloc[0]
-        raise ValueError(
-            f"{row['target_kind']}: prediction unit {row['unit']} "
-            f"!= label unit {row['unit_label']}"
-        )
+    columns = [*key, "y_true", "eligible", "exclusion_reason"]
+    joined = predictions.merge(labels[columns], on=key, how="inner", validate="m:1")
     shifted = joined["target_start_utc"] - DAY_OFFSET
-    return joined.drop(columns=["_merge", "unit_label"]).assign(
+    return joined.assign(
         eligible=lambda d: d["eligible"].astype(bool),
         day=shifted.dt.tz_convert(None).dt.floor("D"),
     )
@@ -249,13 +306,12 @@ def join_labels(predictions: pd.DataFrame, labels: pd.DataFrame) -> pd.DataFrame
 
 def mark_common(joined: pd.DataFrame) -> pd.DataFrame:
     scored = joined["eligible"] & joined["estimate"].notna()
-    n_models = joined.groupby(["split", "target_kind"])["model_version"].transform(
-        "nunique"
-    )
-    n_scored = joined[scored].groupby(["prediction_id", "target_kind"])
-    n_scored = n_scored["model_version"].transform("nunique")
+    rows = joined[scored]
+    n_active = rows.groupby(CELL)["model_version"].transform("nunique")
+    n_models = rows.groupby(["prediction_id", "target_kind"])["model_version"]
+    common = n_models.transform("nunique").eq(n_active)
     return joined.assign(
-        scored=scored, common=n_scored.reindex(joined.index).eq(n_models)
+        scored=scored, common=common.reindex(joined.index, fill_value=False)
     )
 
 
@@ -393,24 +449,35 @@ def classification_metrics(rows: pd.DataFrame) -> list[dict]:
     return metrics
 
 
-def skill_metrics(common: pd.DataFrame, model: str, binary: bool) -> list[dict]:
-    baselines = [b for b in REQUIRED_BASELINES if b != model]
-    names = {f"skill_vs_{b}": "share" for b in baselines}
-    if common.empty:
-        return null_metrics(names, "no_predicted_rows")
-    squared = common.assign(se=(common["estimate"] - common["y_true"]) ** 2).pivot(
+def squared_errors(scored: pd.DataFrame) -> pd.DataFrame:
+    return scored.assign(se=(scored["estimate"] - scored["y_true"]) ** 2).pivot(
         index="prediction_id", columns="model_version", values="se"
     )
-    days = common.drop_duplicates("prediction_id").set_index("prediction_id")["day"]
-    days = days.reindex(squared.index)
+
+
+def baseline_support(squared: pd.DataFrame, model: str) -> pd.DataFrame:
+    if model not in squared:
+        return squared.iloc[:0]
+    columns = dict.fromkeys([model, *REQUIRED_BASELINES])
+    return squared[[c for c in columns if c in squared]].dropna()
+
+
+def skill_metrics(
+    support: pd.DataFrame, days: pd.Series, model: str, binary: bool
+) -> list[dict]:
+    baselines = [b for b in REQUIRED_BASELINES if b != model]
+    if support.empty:
+        names = {f"skill_vs_{b}": "share" for b in baselines}
+        return null_metrics(names, "no_predicted_rows")
+    days = days.reindex(support.index)
     stat = _brier_skill if binary else _rmse_skill
     metrics = []
     for baseline in baselines:
         name = f"skill_vs_{baseline}"
-        if baseline not in squared:
+        if baseline not in support:
             metrics.append(_metric(name, None, "share", reason="baseline_absent"))
             continue
-        model_se, base_se = squared[model].to_numpy(), squared[baseline].to_numpy()
+        model_se, base_se = support[model].to_numpy(), support[baseline].to_numpy()
         if base_se.sum() == 0:
             metrics.append(_metric(name, None, "share", reason="baseline_error_zero"))
             continue
@@ -446,6 +513,29 @@ def cancellation_rate(counts: dict) -> dict:
     return _metric("cancellation_rate", cancelled / scheduled, "share")
 
 
+def _rows(
+    identity: dict,
+    place: dict,
+    model: str,
+    basis: dict[str, list[str]],
+    slice_name: str,
+    metrics: list[dict],
+    counts: dict,
+) -> list[dict]:
+    return [
+        {
+            **identity,
+            "model": model,
+            "availability_basis": basis.get(model, []),
+            **place,
+            "slice": slice_name,
+            **metric,
+            **counts,
+        }
+        for metric in metrics
+    ]
+
+
 def evaluate_target(frame: pd.DataFrame, basis: dict[str, list[str]]) -> list[dict]:
     split, target = frame["split"].iloc[0], frame["target_kind"].iloc[0]
     binary = target in BINARY
@@ -455,6 +545,13 @@ def evaluate_target(frame: pd.DataFrame, basis: dict[str, list[str]]) -> list[di
     empty = null_metrics(
         metric_units(binary, frame["unit"].iloc[0]), "no_predicted_rows"
     )
+    identity = {
+        "split": split,
+        "cohort": frame["cohort_version"].iloc[0],
+        "task": frame["task"].iloc[0],
+        "target": target,
+        "target_label": TARGET_LABELS.get(target, target),
+    }
     records = []
     for airport, horizon in product(airports, horizons):
         cell = frame
@@ -465,6 +562,14 @@ def evaluate_target(frame: pd.DataFrame, basis: dict[str, list[str]]) -> list[di
         if cell.empty:
             continue
         common = cell[cell["common"]]
+        scored = cell[cell["scored"]]
+        squared = squared_errors(scored)
+        days = scored.drop_duplicates("prediction_id").set_index("prediction_id")["day"]
+        place = {
+            "airport": airport,
+            "horizon": int(horizon) if horizon != ALL_HORIZONS else horizon,
+        }
+
         for model, slice_name in product(models, ["own_support", "common_support"]):
             own = cell[cell["model_version"].eq(model)]
             in_common = slice_name == "common_support"
@@ -476,38 +581,28 @@ def evaluate_target(frame: pd.DataFrame, basis: dict[str, list[str]]) -> list[di
                 metrics = classification_metrics(rows)
             else:
                 metrics = regression_metrics(rows)
-            if in_common:
-                metrics += skill_metrics(common, model, binary)
             counts = _cell_counts(own, rows, binary)
             if target == SEVERE and not in_common:
                 metrics.append(cancellation_rate(counts))
-            for metric in metrics:
-                records.append(
-                    {
-                        "split": split,
-                        "task": frame["task"].iloc[0],
-                        "target": target,
-                        "target_label": TARGET_LABELS.get(target, target),
-                        "model": model,
-                        "availability_basis": basis.get(model, []),
-                        "airport": airport,
-                        "horizon": int(horizon) if horizon != ALL_HORIZONS else horizon,
-                        "slice": slice_name,
-                        **metric,
-                        **counts,
-                    }
-                )
+            records += _rows(identity, place, model, basis, slice_name, metrics, counts)
+        for model in models:
+            own = cell[cell["model_version"].eq(model)]
+            support = baseline_support(squared, model)
+            rows = own[own["prediction_id"].isin(support.index)]
+            counts = _cell_counts(own, rows, binary)
+            skill = skill_metrics(support, days, model, binary)
+            records += _rows(
+                identity, place, model, basis, "baseline_support", skill, counts
+            )
     return records
 
 
 def macro_records(records: list[dict]) -> list[dict]:
     table = pd.DataFrame(records)
     table = table[table["airport"].ne(POOLED)]
-    n_airports = table["airport"].nunique()
-    if n_airports < 2:
-        return []
     keys = [
         "split",
+        "cohort",
         "task",
         "target",
         "target_label",
@@ -518,7 +613,7 @@ def macro_records(records: list[dict]) -> list[dict]:
     ]
     macro = []
     for values, group in table.groupby(keys, sort=False):
-        complete = group["value"].notna().all() and len(group) == n_airports
+        complete = group["value"].notna().all() and len(group) == len(AIRPORTS)
         exclusions: dict[str, int] = {}
         for counts in group["exclusions"]:
             for reason, n in counts.items():
@@ -549,8 +644,8 @@ def macro_records(records: list[dict]) -> list[dict]:
 def reliability(joined: pd.DataFrame) -> list[dict]:
     rows = joined[joined["target_kind"].isin(BINARY) & joined["common"]]
     bins = []
-    keys = ["split", "target_kind", "model_version"]
-    for (split, target, model), group in rows.groupby(keys):
+    keys = [*SCOPE, "model_version"]
+    for (split, cohort, target, model), group in rows.groupby(keys):
         for airport in [*sorted(group["airport_icao"].unique()), POOLED]:
             cell = group
             if airport != POOLED:
@@ -567,6 +662,7 @@ def reliability(joined: pd.DataFrame) -> list[dict]:
             bins += [
                 {
                     "split": split,
+                    "cohort": cohort,
                     "target": target,
                     "model": model,
                     "airport": airport,
@@ -587,7 +683,7 @@ def worst_misses(joined: pd.DataFrame) -> list[dict]:
     rows = rows.assign(abs_error=rows["error"].abs()).sort_values(
         ["abs_error", "prediction_id"], ascending=[False, True]
     )
-    group = ["split", "target_kind", "model_version"]
+    group = [*SCOPE, "model_version"]
     # One event fills every horizon, so each airport-day appears once.
     rows = rows.drop_duplicates([*group, "airport_icao", "day"])
     baselines = joined[is_baseline(joined["model_version"])]
@@ -599,6 +695,7 @@ def worst_misses(joined: pd.DataFrame) -> list[dict]:
         misses.append(
             {
                 "split": row["split"],
+                "cohort": row["cohort_version"],
                 "target": row["target_kind"],
                 "target_label": TARGET_LABELS.get(
                     row["target_kind"], row["target_kind"]
@@ -639,7 +736,7 @@ def availability_basis(predictions: pd.DataFrame) -> dict[str, list[str]]:
 def _colours(models: list[str]) -> dict[str, str]:
     # Candidates first, so the legend leads with what is being judged.
     ordered = sorted(models, key=lambda m: (m in BASELINE_COLOURS, m))
-    candidates = iter(CANDIDATE_COLOURS)
+    candidates = cycle(CANDIDATE_COLOURS)
     return {m: BASELINE_COLOURS.get(m) or next(candidates) for m in ordered}
 
 
@@ -658,11 +755,15 @@ def _style(ax: plt.Axes) -> None:
     ax.tick_params(colors=MUTED_INK, length=0)
 
 
-def _legend(fig: plt.Figure, ax: plt.Axes, ncol: int) -> None:
-    handles, labels = ax.get_legend_handles_labels()
+def _legend(fig: plt.Figure, axes: list[plt.Axes], ncol: int) -> None:
+    # A model can be absent from one airport, so every panel adds to the legend.
+    entries = {}
+    for ax in axes:
+        handles, labels = ax.get_legend_handles_labels()
+        entries |= dict(zip(labels, handles))
     fig.legend(
-        handles,
-        labels,
+        list(entries.values()),
+        list(entries),
         loc="lower center",
         ncol=ncol,
         frameon=False,
@@ -675,12 +776,14 @@ def rmse_figure(
     records: list[dict],
     basis: dict[str, list[str]],
     split: str,
+    cohort: str,
     target: str,
     path: Path,
 ) -> None:
     table = pd.DataFrame(records)
     table = table[
         table["split"].eq(split)
+        & table["cohort"].eq(cohort)
         & table["target"].eq(target)
         & table["metric"].eq("rmse")
         & table["slice"].eq("common_support")
@@ -721,14 +824,14 @@ def rmse_figure(
     unit = table["unit"].iloc[0]
     axes[0][0].set_ylabel(f"RMSE ({unit})", color=MUTED_INK)
     fig.suptitle(
-        f"{TARGET_LABELS.get(target, target)}: RMSE by horizon, {split}",
+        f"{TARGET_LABELS.get(target, target)}: RMSE by horizon, {split}, {cohort}",
         color=INK,
         fontsize=12,
         x=0.01,
         ha="left",
     )
     fig.tight_layout(rect=(0, 0.14, 1, 0.97))
-    _legend(fig, axes[0][0], ncol=3)
+    _legend(fig, list(axes[0]), ncol=3)
     fig.savefig(path, dpi=160)
     plt.close(fig)
 
@@ -737,6 +840,7 @@ def reliability_figure(
     bins: list[dict],
     basis: dict[str, list[str]],
     split: str,
+    cohort: str,
     target: str,
     path: Path,
 ) -> None:
@@ -745,6 +849,7 @@ def reliability_figure(
         return
     table = table[
         table["split"].eq(split)
+        & table["cohort"].eq(cohort)
         & table["target"].eq(target)
         & table["airport"].eq(POOLED)
     ]
@@ -766,11 +871,11 @@ def reliability_figure(
         )
     ax.set_xlabel("mean predicted probability", color=MUTED_INK)
     ax.set_ylabel("observed rate", color=MUTED_INK)
-    title = f"{TARGET_LABELS.get(target, target)}\nreliability, {split}"
+    title = f"{TARGET_LABELS.get(target, target)}\nreliability, {split}, {cohort}"
     ax.set_title(title, color=INK, fontsize=10, loc="left")
     _style(ax)
     fig.tight_layout(rect=(0, 0.14, 1, 1))
-    _legend(fig, ax, ncol=2)
+    _legend(fig, [ax], ncol=2)
     fig.savefig(path, dpi=160)
     plt.close(fig)
 
@@ -790,13 +895,27 @@ def main(
     reports: Path = REPORTS,
     locked_test: bool = False,
     approved_by: str | None = None,
+    experiment: str = "primary",
+    cohorts: list[str] | None = None,
 ) -> Path:
-    predictions = load_predictions(artifacts, runs, locked_test)
+    if experiment not in LOCKED_EXPERIMENTS:
+        raise ValueError(f"experiment outside {LOCKED_EXPERIMENTS}")
+    # Hashed before the read, because worktrees share data/.
+    sources = [artifacts / r / "predictions.parquet" for r in runs]
+    data_sha256 = {str(p): sha256(p) for p in [*sources, labels_path, requests_path]}
+    predictions = load_predictions(artifacts, runs, locked_test, cohorts)
     check_contract(predictions)
     requests = pd.read_parquet(requests_path, columns=REQUEST_KEYS)
+    if cohorts:
+        requests = requests[requests["cohort_version"].isin(cohorts)]
     check_requests(predictions, requests)
     check_baselines(predictions)
-    modes = set(predictions["data_mode"]) | {labels_data_mode(labels_path)}
+    check_label_keys(labels_path, predictions)
+    modes = (
+        set(predictions["data_mode"])
+        | set(requests["data_mode"])
+        | {labels_data_mode(labels_path)}
+    )
     if len(modes) != 1:
         raise ValueError(f"mixed data_mode {sorted(modes)}")
     data_mode = modes.pop()
@@ -805,8 +924,11 @@ def main(
     ledger = reports / "locked_runs"
     if data_mode == "fixture":
         reports = reports / "fixture"
-    path = reports / ("metrics.json" if locked_test else "metrics_dev.json")
-    run_id = "evaluate_locked_test" if locked_test else "evaluate_dev"
+    suffix = "" if experiment == "primary" else f"_{experiment}"
+    name = f"metrics{suffix}.json" if locked_test else f"metrics_dev{suffix}.json"
+    path = reports / name
+    figures = reports / "figures" / experiment.replace("primary", "")
+    run_id = f"evaluate_{experiment}" if locked_test else f"evaluate_dev{suffix}"
     commit, commit_dirty = git("rev-parse", "HEAD"), source_dirty()
     if locked_test:
         if not approved_by:
@@ -815,6 +937,8 @@ def main(
             raise ValueError(f"locked test needs real data, got {data_mode}")
         if commit_dirty:
             raise ValueError(f"locked test needs {SOURCE_PATHS} committed")
+        if predictions["data_snapshot_id"].nunique() != 1:
+            raise ValueError("locked test needs one data snapshot across runs")
         check_locked_candidates(predictions)
         check_run_manifests(artifacts, runs)
         claim_locked_run(run_id, approved_by, commit, ledger)
@@ -823,15 +947,16 @@ def main(
     joined = mark_common(join_labels(predictions, labels))
     basis = availability_basis(predictions)
     records = []
-    for _, frame in joined.groupby(["split", "target_kind"]):
+    for _, frame in joined.groupby(SCOPE):
         records += evaluate_target(frame, basis)
     records += macro_records(records)
     bins = reliability(joined)
     splits = sorted(joined["split"].unique())
-    sources = [artifacts / r / "predictions.parquet" for r in runs]
     report = {
         "run_id": run_id,
         "scope": "locked_test" if locked_test else "dev",
+        "experiment": experiment,
+        "cohorts": sorted(joined["cohort_version"].unique()),
         "data_mode": data_mode,
         "commit": commit,
         "commit_dirty": commit_dirty,
@@ -839,9 +964,7 @@ def main(
         "seed": EXPERIMENT["seed"],
         "config_sha256": {str(c): sha256(c) for c in CONFIGS},
         "uv_lock_sha256": sha256(Path("uv.lock")),
-        "data_sha256": {
-            str(p): sha256(p) for p in [*sources, labels_path, requests_path]
-        },
+        "data_sha256": data_sha256,
         "data_snapshot_ids": sorted(predictions["data_snapshot_id"].unique()),
         "label_versions": sorted(labels["label_version"].unique()),
         "split_bounds": {s: [_utc(t) for t in split_bounds(s)] for s in splits},
@@ -855,15 +978,15 @@ def main(
         "reliability": bins,
         "worst_misses": worst_misses(joined),
     }
-    figures = reports / "figures"
     figures.mkdir(parents=True, exist_ok=True)
-    for split, target in joined[["split", "target_kind"]].drop_duplicates().to_numpy():
+    for split, cohort, target in joined[SCOPE].drop_duplicates().to_numpy():
+        stem = f"{target}_{split}_{cohort}.png"
         if target in BINARY:
-            name = f"reliability_{target}_{split}.png"
-            reliability_figure(bins, basis, split, target, figures / name)
+            reliability_figure(
+                bins, basis, split, cohort, target, figures / f"reliability_{stem}"
+            )
         else:
-            name = f"rmse_{target}_{split}.png"
-            rmse_figure(records, basis, split, target, figures / name)
+            rmse_figure(records, basis, split, cohort, target, figures / f"rmse_{stem}")
     # Written last, so a report on disk always has its figures.
     write_report(report, path)
     print(path, f"data_mode={data_mode}", f"records={len(records)}")
@@ -875,10 +998,18 @@ if __name__ == "__main__":
     parser.add_argument("--locked-test", action="store_true")
     parser.add_argument("--approved-by")
     parser.add_argument("--runs", nargs="+")
+    parser.add_argument("--experiment", default="primary", choices=LOCKED_EXPERIMENTS)
+    parser.add_argument("--cohorts", nargs="+")
+    parser.add_argument("--requests", type=Path, default=REQUESTS)
+    parser.add_argument("--reports", type=Path, default=REPORTS)
     args = parser.parse_args()
     default = "baselines_locked_test" if args.locked_test else "baselines_dev"
     main(
         args.runs or [default],
+        requests_path=args.requests,
+        reports=args.reports,
         locked_test=args.locked_test,
         approved_by=args.approved_by,
+        experiment=args.experiment,
+        cohorts=args.cohorts,
     )
