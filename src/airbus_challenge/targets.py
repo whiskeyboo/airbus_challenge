@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 import pyarrow as pa
+import pyarrow.dataset as ds
 import pyarrow.parquet as pq
 import yaml
 
@@ -15,7 +16,7 @@ FLIGHTS = Path("data/processed/flights.parquet")
 REQUESTS = Path("data/processed/prediction_requests.parquet")
 HOURLY = Path("data/processed/airport_hourly.parquet")
 LABELS = Path("data/labels/labels.parquet")
-VERSION = "0.6.0"
+VERSION = "0.7.0"
 LABEL_VERSION = "0.4.0"
 METRICS = {
     "scheduled_departures": (
@@ -654,6 +655,209 @@ def split_name(times, experiment):
     return result
 
 
+def fit_cutoff_time(value, experiment):
+    cutoff = pd.Timestamp(value or experiment["splits"]["train"]["end"])
+    if cutoff.tzinfo is None:
+        if value is not None:
+            raise ValueError("Fit cutoff must include a timezone")
+        cutoff = cutoff.tz_localize("UTC")
+    if pd.isna(cutoff):
+        raise ValueError("Fit cutoff must be a valid timestamp")
+    return cutoff.tz_convert("UTC")
+
+
+def select_training_labels(
+    requests, labels, cohort, definition, experiment, fit_cutoff
+):
+    cutoff = fit_cutoff_time(fit_cutoff, experiment)
+    window = experiment["splits"]["train"]
+    selected = requests.loc[
+        requests.cohort_version.eq(cohort)
+        & requests.airport_icao.isin(definition["train_airports"])
+        & requests.task.isin(definition["tasks"])
+        & requests.target_start_utc.ge(pd.Timestamp(window["start"], tz="UTC"))
+        & requests.target_start_utc.lt(pd.Timestamp(window["end"], tz="UTC"))
+    ]
+    context = selected.drop(columns=["data_mode"]).set_index("prediction_id")
+    return _select_training_outcomes(context, labels, definition, experiment, cutoff)
+
+
+def _select_training_outcomes(context, labels, definition, experiment, cutoff):
+    joined = labels.join(
+        context, on="prediction_id", how="inner", validate="many_to_one"
+    )
+    eligible = joined.eligible.fillna(False)
+    if joined.loc[eligible, ["y_true", "outcome_available_at_utc"]].isna().any().any():
+        raise ValueError(
+            "Eligible training labels require an outcome and availability time"
+        )
+    if not joined.loc[eligible, "availability_basis"].eq("simulated").all():
+        raise ValueError(
+            "Training labels require the declared simulated availability basis"
+        )
+    allowed = {
+        "severe_delay": ["departure_delay_gt45", "cancellation"],
+        "throughput": ["reporting_carrier_touchdowns"]
+        + (
+            [experiment["targets"]["capacity_ratio"]]
+            if definition["ratio_labels"]
+            else []
+        ),
+    }
+    valid_target = pd.Series(False, index=joined.index)
+    for task, kinds in allowed.items():
+        valid_target |= joined.task.eq(task) & joined.target_kind.isin(kinds)
+    if not valid_target.all():
+        raise ValueError("Training label target is forbidden for its cohort/task")
+    return joined.loc[eligible & joined.outcome_available_at_utc.le(cutoff)].assign(
+        fit_cutoff_utc=cutoff
+    )
+
+
+def build_training_labels(
+    requests_path=REQUESTS,
+    labels_path=LABELS,
+    cohort=COHORT_VERSION,
+    fit_cutoff=None,
+    output_dir=None,
+):
+    requests_path, labels_path = Path(requests_path), Path(labels_path)
+    experiment = yaml.safe_load(Path("configs/experiment.yaml").read_text())
+    airports = yaml.safe_load(Path("configs/airports.yaml").read_text())["airports"]
+    definitions = cohort_definitions(list(airports))
+    if cohort not in definitions:
+        raise ValueError(f"Unknown training cohort: {cohort}")
+    definition = definitions[cohort]
+    cutoff = fit_cutoff_time(fit_cutoff, experiment)
+    manifests = []
+    for path in [requests_path, labels_path]:
+        manifest = json.loads(path.with_suffix(".manifest.json").read_text())
+        if sha256(path) != manifest["parquet_sha256"]:
+            raise ValueError(f"Input Parquet hash disagrees with manifest: {path}")
+        validate_data_mode(manifest["data_mode"])
+        manifests.append(manifest)
+    request_manifest, label_manifest = manifests
+    if (
+        request_manifest["data_mode"] != label_manifest["data_mode"]
+        or label_manifest["source_requests_sha256"]
+        != request_manifest["parquet_sha256"]
+        or label_manifest["source_flights_sha256"]
+        != request_manifest["source_flights_sha256"]
+    ):
+        raise ValueError("Training labels and requests must use the same dataset")
+    if request_manifest.get("cohorts", {}).get(cohort) != definition:
+        raise ValueError(
+            "Training cohort manifest disagrees with the approved definition"
+        )
+    reference = None
+    if definition["ratio_labels"]:
+        hourly_manifest = labels_path.with_name("airport_hourly.manifest.json")
+        if not hourly_manifest.exists():
+            hourly_manifest = HOURLY.with_suffix(".manifest.json")
+        reference = json.loads(hourly_manifest.read_text())["capacity_ratio"]
+        if reference["reference_id"] != label_manifest["capacity_reference_id"]:
+            raise ValueError(
+                "Training ratio labels disagree with the capacity reference"
+            )
+        if cutoff < pd.Timestamp(reference["train_end_exclusive_utc"]):
+            raise ValueError(
+                "Capacity reference was fitted after the requested fit cutoff"
+            )
+    window = experiment["splits"]["train"]
+    request_filter = (
+        (ds.field("cohort_version") == cohort)
+        & ds.field("airport_icao").isin(definition["train_airports"])
+        & ds.field("task").isin(definition["tasks"])
+        & (ds.field("target_start_utc") >= pd.Timestamp(window["start"], tz="UTC"))
+        & (ds.field("target_start_utc") < pd.Timestamp(window["end"], tz="UTC"))
+    )
+    requests = ds.dataset(requests_path).to_table(filter=request_filter).to_pandas()
+    if requests.empty:
+        raise ValueError("Training cohort has no requests")
+    if not requests.data_mode.eq(request_manifest["data_mode"]).all():
+        raise ValueError("Training request data_mode disagrees with manifest")
+    label_filter = ds.field("prediction_id").isin(requests.prediction_id)
+    context = requests.drop(columns=["data_mode"]).set_index("prediction_id")
+    # Predicate is established from outcome-free requests before projecting outcomes.
+    scanner = ds.dataset(labels_path).scanner(filter=label_filter, batch_size=100_000)
+    schema = pa.schema(
+        [
+            *LABEL_SCHEMA,
+            *[
+                f
+                for f in pq.read_schema(requests_path)
+                if f.name not in LABEL_SCHEMA.names
+            ],
+            pa.field("fit_cutoff_utc", pa.timestamp("us", tz="UTC")),
+        ]
+    )
+    path = Path(output_dir or labels_path.parent) / cohort / "training_labels.parquet"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(".training_labels.parquet.tmp")
+    rows, summaries = 0, []
+    with pq.ParquetWriter(tmp, schema) as writer:
+        for batch in scanner.to_batches():
+            if not batch.num_rows:
+                continue
+            labels = batch.to_pandas()
+            if not labels.data_mode.eq(label_manifest["data_mode"]).all():
+                raise ValueError("Training label data_mode disagrees with manifest")
+            selected = _select_training_outcomes(
+                context, labels, definition, experiment, cutoff
+            )
+            if selected.empty:
+                continue
+            writer.write_table(
+                pa.Table.from_pandas(selected, schema=schema, preserve_index=False)
+            )
+            rows += len(selected)
+            summaries.append(
+                selected.groupby(["airport_icao", "task", "target_kind", "horizon_h"])
+                .size()
+                .rename("rows")
+                .reset_index()
+            )
+    if not rows:
+        tmp.unlink()
+        raise ValueError("No eligible training labels are available by the fit cutoff")
+    tmp.replace(path)
+    counts = (
+        pd.concat(summaries)
+        .groupby(["airport_icao", "task", "target_kind", "horizon_h"], as_index=False)[
+            "rows"
+        ]
+        .sum()
+        .to_dict(orient="records")
+    )
+    write_manifest(
+        path,
+        rows,
+        {
+            "data_mode": label_manifest["data_mode"],
+            "parquet_sha256": label_manifest["source_flights_sha256"],
+            "sources": label_manifest["sources"],
+        },
+        {
+            "schema_version": "1.0.0",
+            "cohort_version": cohort,
+            "cohort": definition,
+            "fit_cutoff_utc": cutoff.isoformat(),
+            "training_window": window,
+            "source_requests_sha256": request_manifest["parquet_sha256"],
+            "source_labels_sha256": label_manifest["parquet_sha256"],
+            "label_availability": label_manifest.get("label_availability"),
+            "capacity_reference_id": reference["reference_id"] if reference else None,
+            "capacity_reference_fit_cutoff_utc": reference["train_end_exclusive_utc"]
+            if reference
+            else None,
+            "counts": counts,
+            "population": "eligible source-airport training labels available at/before fit cutoff; no validation, calibration, or test targets",
+        },
+    )
+    print(path, rows)
+    return path
+
+
 def operational_feed(hourly, latency_min):
     latency = pd.Timedelta(minutes=latency_min)
     if pd.isna(latency) or latency < pd.Timedelta(0):
@@ -1273,11 +1477,24 @@ if __name__ == "__main__":
         action="store_true",
         help="Reuse verified hourly counts; update the reference only when its policy changes",
     )
-    parser.add_argument("--operational-feed-only", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--operational-feed-only", action="store_true")
+    mode.add_argument("--training-labels-only", action="store_true")
+    parser.add_argument("--labels", type=Path, default=LABELS)
+    parser.add_argument("--cohort", default=COHORT_VERSION)
+    parser.add_argument("--fit-cutoff-utc")
     parser.add_argument("--hourly", type=Path, default=HOURLY)
     parser.add_argument("--feed-latency-min", type=int)
     args = parser.parse_args()
     if args.operational_feed_only:
         build_operational_feed(args.hourly, args.output_dir, args.feed_latency_min)
+    elif args.training_labels_only:
+        build_training_labels(
+            args.requests,
+            args.labels,
+            args.cohort,
+            args.fit_cutoff_utc,
+            args.output_dir,
+        )
     else:
         build(args.requests, args.output_dir, args.reuse_hourly)
