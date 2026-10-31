@@ -1,0 +1,182 @@
+{
+  "generated_at_utc": "2026-10-31T08:27:59.695911+00:00",
+  "commit": "2f5c7ed8b6c99463c9fcdc55ef6ab471df4197cc",
+  "scope": "dev (validation H1 2024, calibration H2 2024), all horizons, common support per table",
+  "ratio": {
+    "label_source": "derived: data/labels/labels.parquet throughput eligibility x data/processed/airport_hourly.parquet throughput_over_clear_weather_p95",
+    "rmse": [
+      {
+        "split": "calibration",
+        "airport_icao": "KATL",
+        "model_version": "baseline_climatology_v1",
+        "rmse": 0.2374244430422029,
+        "n": 17648
+      },
+      {
+        "split": "calibration",
+        "airport_icao": "KATL",
+        "model_version": "baseline_persistence_v1",
+        "rmse": 0.4509323975944121,
+        "n": 17648
+      },
+      {
+        "split": "calibration",
+        "airport_icao": "KDFW",
+        "model_version": "baseline_climatology_v1",
+        "rmse": 0.31374293960148464,
+        "n": 17580
+      },
+      {
+        "split": "calibration",
+        "airport_icao": "KDFW",
+        "model_version": "baseline_persistence_v1",
+        "rmse": 0.48083360221104054,
+        "n": 17580
+      },
+      {
+        "split": "validation",
+        "airport_icao": "KATL",
+        "model_version": "baseline_climatology_v1",
+        "rmse": 0.19061452461745754,
+        "n": 17345
+      },
+      {
+        "split": "validation",
+        "airport_icao": "KATL",
+        "model_version": "baseline_persistence_v1",
+        "rmse": 0.4023824295301545,
+        "n": 17345
+      },
+      {
+        "split": "validation",
+        "airport_icao": "KDFW",
+        "model_version": "baseline_climatology_v1",
+        "rmse": 0.2824828895254893,
+        "n": 17402
+      },
+      {
+        "split": "validation",
+        "airport_icao": "KDFW",
+        "model_version": "baseline_persistence_v1",
+        "rmse": 0.40754223959429814,
+        "n": 17402
+      }
+    ]
+  },
+  "transfer": {
+    "KATL": {
+      "train_airports": [
+        "KDFW"
+      ],
+      "fit": {
+        "source_airports": [
+          "KDFW"
+        ],
+        "slope": 0.6983954163412824,
+        "intercept": 9.304426684789776,
+        "n_train": 8751
+      },
+      "rmse": [
+        {
+          "split": "calibration",
+          "airport_icao": "KATL",
+          "model_version": "baseline_climatology_v1",
+          "rmse": 8.782673565037808,
+          "n": 17648
+        },
+        {
+          "split": "calibration",
+          "airport_icao": "KATL",
+          "model_version": "baseline_persistence_v1",
+          "rmse": 39.11137173975578,
+          "n": 17648
+        },
+        {
+          "split": "calibration",
+          "airport_icao": "KATL",
+          "model_version": "baseline_transfer_schedule_v1",
+          "rmse": 10.196253405650507,
+          "n": 17648
+        },
+        {
+          "split": "validation",
+          "airport_icao": "KATL",
+          "model_version": "baseline_climatology_v1",
+          "rmse": 6.740074493429943,
+          "n": 17345
+        },
+        {
+          "split": "validation",
+          "airport_icao": "KATL",
+          "model_version": "baseline_persistence_v1",
+          "rmse": 38.1822940074352,
+          "n": 17345
+        },
+        {
+          "split": "validation",
+          "airport_icao": "KATL",
+          "model_version": "baseline_transfer_schedule_v1",
+          "rmse": 9.487578563625444,
+          "n": 17345
+        }
+      ]
+    },
+    "KDFW": {
+      "train_airports": [
+        "KATL"
+      ],
+      "fit": {
+        "source_airports": [
+          "KATL"
+        ],
+        "slope": 0.9039136554525549,
+        "intercept": 3.3645465950928264,
+        "n_train": 8751
+      },
+      "rmse": [
+        {
+          "split": "calibration",
+          "airport_icao": "KDFW",
+          "model_version": "baseline_climatology_v1",
+          "rmse": 13.085011752042275,
+          "n": 17580
+        },
+        {
+          "split": "calibration",
+          "airport_icao": "KDFW",
+          "model_version": "baseline_persistence_v1",
+          "rmse": 37.6882027391999,
+          "n": 17580
+        },
+        {
+          "split": "calibration",
+          "airport_icao": "KDFW",
+          "model_version": "baseline_transfer_schedule_v1",
+          "rmse": 13.528188351897478,
+          "n": 17580
+        },
+        {
+          "split": "validation",
+          "airport_icao": "KDFW",
+          "model_version": "baseline_climatology_v1",
+          "rmse": 9.864584229581986,
+          "n": 17402
+        },
+        {
+          "split": "validation",
+          "airport_icao": "KDFW",
+          "model_version": "baseline_persistence_v1",
+          "rmse": 32.956064269935496,
+          "n": 17402
+        },
+        {
+          "split": "validation",
+          "airport_icao": "KDFW",
+          "model_version": "baseline_transfer_schedule_v1",
+          "rmse": 13.385234440256314,
+          "n": 17402
+        }
+      ]
+    }
+  }
+}
