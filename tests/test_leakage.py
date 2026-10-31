@@ -472,23 +472,36 @@ def test_corrected_metar_is_never_used_and_skip_is_reported():
     assert row.reason_codes == []
 
 
-def test_official_report_preferred_over_madis_on_observed_time_tie():
+# Both id orders and both row orders, so neither id sorting nor row order can pass for the rule.
+TIE_ORDERS = [
+    ("a-madis", "z-official", False),
+    ("z-madis", "a-official", False),
+    ("a-madis", "z-official", True),
+    ("z-madis", "a-official", True),
+]
+
+
+def tie_pair(observed, madis_rid, official_rid, official_first, **official):
+    madis = metar(
+        observed,
+        status="missing",
+        wind=np.nan,
+        wind_from=np.nan,
+        pressure=1000.0,
+        flags=("madis_hf", "duplicate_observed_time"),
+        rid=madis_rid,
+    )
+    off = metar(observed, flags=("duplicate_observed_time",), rid=official_rid, **official)
+    return [off, madis] if official_first else [madis, off]
+
+
+@pytest.mark.parametrize("madis_rid, official_rid, official_first", TIE_ORDERS)
+def test_official_report_preferred_over_madis_on_observed_time_tie(
+    madis_rid, official_rid, official_first
+):
     obs = obs_table(
         *OBS[:2],
-        metar(
-            "2023-06-01 10:52",
-            status="missing",
-            wind=np.nan,
-            wind_from=np.nan,
-            flags=("madis_hf", "duplicate_observed_time"),
-            rid="a-madis",
-        ),
-        metar(
-            "2023-06-01 10:52",
-            wind=7.0,
-            flags=("duplicate_observed_time",),
-            rid="z-official",
-        ),
+        *tie_pair("2023-06-01 10:52", madis_rid, official_rid, official_first, wind=7.0),
     )
     row, lineage = snap(
         obs, fc_table(ROUTINE), request("2023-06-01 12:00", "2023-06-01 18:00")
@@ -496,7 +509,24 @@ def test_official_report_preferred_over_madis_on_observed_time_tie():
     assert row.metar_wind_kt == 7.0 and row.metar_wind_status == "directional"
     assert set(
         lineage.loc[lineage.feature_group == "metar_latest", "source_record_id"]
-    ) == {"z-official"}
+    ) == {official_rid}
+
+
+@pytest.mark.parametrize("madis_rid, official_rid, official_first", TIE_ORDERS)
+def test_pressure_tendency_window_start_prefers_official_on_tie(
+    madis_rid, official_rid, official_first
+):
+    # Window at T=12:00 starts with the 08:52 pair; the official report reads 1012 hPa,
+    # MADIS 1000 hPa. Latest is 10:52 at 1015 hPa, so the tendency must be +3, not +15.
+    obs = obs_table(
+        *tie_pair("2023-06-01 08:52", madis_rid, official_rid, official_first, pressure=1012.0),
+        metar("2023-06-01 09:52", pressure=1013.0),
+        metar("2023-06-01 10:52", pressure=1015.0),
+    )
+    row, _ = snap(
+        obs, fc_table(ROUTINE), request("2023-06-01 12:00", "2023-06-01 18:00")
+    )
+    assert row.metar_pressure_tendency_3h_hpa == pytest.approx(3.0)
 
 
 def test_variable_taf_wind_counts_as_worst_case_tailwind():
