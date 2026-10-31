@@ -1,3 +1,4 @@
+import argparse
 import collections
 import functools
 import hashlib
@@ -806,21 +807,29 @@ def months_of(start: pd.Timestamp, end: pd.Timestamp) -> list[pd.Timestamp]:
     return list(pd.date_range(start.floor("D").replace(day=1), end, freq="MS"))
 
 
-def build_requests(processed: Path = iem.PROCESSED) -> dict:
+def build_requests(
+    processed: Path = iem.PROCESSED,
+    requests_path: Path | None = None,
+    output_dir: Path | None = None,
+) -> dict:
     """feature_snapshots / feature_lineage for every prediction request, one month at a time.
 
     Reads only the weather tables, their manifests and prediction_requests (request columns).
+    A cohort passes its own requests file and output_dir, so working tables stay untouched.
     """
     t0 = time.time()
     obs, fc = load_weather(processed)
     snapshot_id = data_snapshot_id(processed)
-    requests = ds.dataset(processed / "prediction_requests.parquet")
+    requests_path = Path(requests_path or processed / "prediction_requests.parquet")
+    output_dir = Path(output_dir or processed)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    requests = ds.dataset(requests_path)
     bounds = requests.to_table(columns=["target_start_utc"]).column(0)
     lo, hi = pc.min_max(bounds).values()
     start = pd.Timestamp(lo.as_py()).tz_convert("UTC")
     stop = pd.Timestamp(hi.as_py()).tz_convert("UTC")
     paths = {
-        n: processed / f"{n}.parquet" for n in ("feature_snapshots", "feature_lineage")
+        n: output_dir / f"{n}.parquet" for n in ("feature_snapshots", "feature_lineage")
     }
     tmps = {n: p.with_name(f".{p.name}.tmp") for n, p in paths.items()}
     writers, counts, keys, status = {}, collections.Counter(), 0, collections.Counter()
@@ -865,15 +874,27 @@ def build_requests(processed: Path = iem.PROCESSED) -> dict:
         "unique_snapshot_keys": int(keys),
         "status_by_task": {f"{t}|{s}": int(n) for (t, s), n in sorted(status.items())},
         "lineage_key": "snapshot_key (join via feature_snapshots.snapshot_key)",
+        "prediction_requests": {
+            "path": str(requests_path),
+            "sha256": file_sha256(requests_path),
+        },
         "runtime_s": round(time.time() - t0, 1),
         "peak_rss_mb": round(peak_rss_mb(), 1),
         "bytes": {n: p.stat().st_size for n, p in paths.items()},
     }
-    manifest = processed / "feature_snapshots.manifest.json"
+    manifest = output_dir / "feature_snapshots.manifest.json"
     tmp = manifest.with_name(f".{manifest.name}.tmp")
     tmp.write_text(json.dumps(summary, indent=2))
     tmp.replace(manifest)
     return summary
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 22), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def peak_rss_mb() -> float:
@@ -882,6 +903,16 @@ def peak_rss_mb() -> float:
 
 
 if __name__ == "__main__":
-    feats, lineage = build()
-    print("airport-hour features", feats.shape, "lineage", lineage.shape)
-    print(json.dumps(build_requests(), indent=2))
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--requests", type=Path, help="cohort requests file")
+    parser.add_argument("--output-dir", type=Path, help="cohort output directory")
+    args = parser.parse_args()
+    if args.requests is None:
+        feats, lineage = build()
+        print("airport-hour features", feats.shape, "lineage", lineage.shape)
+    print(
+        json.dumps(
+            build_requests(requests_path=args.requests, output_dir=args.output_dir),
+            indent=2,
+        )
+    )

@@ -903,9 +903,10 @@ def hook(event, args):
     if event == "open" and isinstance(args[0], (str, bytes, os.PathLike)):
         opened.append(str(Path(os.fsdecode(args[0])).resolve()))
 sys.addaudithook(hook)
-F.build_requests()
+F.build_requests(**json.loads(sys.argv[1]))
 print(json.dumps({"module": F.__file__, "opened": opened}))
 """
+COHORT = "data/processed/cohorts/loao_KATL_v1"
 OUTCOME_FILES = [
     "data/processed/flights.parquet",
     "data/processed/airport_hourly.parquet",
@@ -918,19 +919,31 @@ OUTCOME_FILES = [
 # Runs the real build in a fresh process (cold caches) inside a project folder where outcome
 # tables exist but cannot be opened by anyone (mode 000), so a native pyarrow read fails too.
 # A Python audit hook records every other file open; all must be on the allowlist.
-def test_request_build_opens_only_weather_requests_and_configs(tmp_path):
+# The cohort variant reads its own requests file and writes only inside its output directory.
+@pytest.mark.parametrize("cohort", [False, True])
+def test_request_build_opens_only_weather_requests_and_configs(tmp_path, cohort):
     repo = Path(__file__).resolve().parents[1]
     (tmp_path / "configs").mkdir()
     for cfg in (repo / "configs").glob("*.yaml"):
         (tmp_path / "configs" / cfg.name).write_text(cfg.read_text())
     obs, fc = dense_weather()
     write_fixture_dir(tmp_path / "data/processed", obs, fc, FLIGHTS)
+    requests_rel = "data/processed/prediction_requests.parquet"
+    kwargs, out_dir = {}, tmp_path / "data/processed"
+    if cohort:
+        requests_rel = f"{COHORT}/prediction_requests.parquet"
+        (tmp_path / COHORT).mkdir(parents=True)
+        (tmp_path / "data/processed/prediction_requests.parquet").rename(
+            tmp_path / requests_rel
+        )
+        kwargs = {"requests_path": requests_rel, "output_dir": COHORT}
+        out_dir = tmp_path / COHORT
     for rel in OUTCOME_FILES:
         decoy = tmp_path / rel
         decoy.parent.mkdir(parents=True, exist_ok=True)
         decoy.write_bytes(b"outcomes")
         decoy.chmod(0)
-    cmd = [sys.executable, "-c", AUDIT_SCRIPT]
+    cmd = [sys.executable, "-c", AUDIT_SCRIPT, json.dumps(kwargs)]
     if shutil.which("sandbox-exec"):
         # macOS: the kernel also denies native (pyarrow) reads of any outcome table, wherever it
         # lives, so an absolute path to the real data folder fails too.
@@ -955,19 +968,29 @@ def test_request_build_opens_only_weather_requests_and_configs(tmp_path):
             "weather_forecasts.parquet",
             "weather_observations.manifest.json",
             "weather_forecasts.manifest.json",
-            "prediction_requests.parquet",
         )
-    } | {root / "configs/airports.yaml", root / "configs/experiment.yaml"}
+    } | {
+        root / requests_rel,
+        root / "configs/airports.yaml",
+        root / "configs/experiment.yaml",
+    }
     outputs = (".feature_snapshots.manifest.json.tmp",)
     bad = []
     for p in map(Path, report["opened"]):
         if p.is_relative_to(root):
-            if p not in allowed_inputs and p.name not in outputs:
+            if p not in allowed_inputs and not (
+                p.name in outputs and p.parent == out_dir.resolve()
+            ):
                 bad.append(p)
         elif "/data/" in str(p) or any(w in p.name for w in FORBIDDEN):
             bad.append(p)
     assert not bad, bad
-    assert (tmp_path / "data/processed/feature_snapshots.parquet").exists()
+    assert (out_dir / "feature_snapshots.parquet").exists()
+    assert (out_dir / "feature_lineage.parquet").exists()
+    if cohort:
+        assert not (tmp_path / "data/processed/feature_snapshots.parquet").exists()
+        manifest = json.loads((out_dir / "feature_snapshots.manifest.json").read_text())
+        assert manifest["prediction_requests"]["path"] == requests_rel
 
 
 FORBIDDEN = ("flights", "labels", "airport_hourly", "Flight_Data_With_Weather")

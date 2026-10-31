@@ -416,3 +416,28 @@ def test_build_opens_only_allowed_files_in_a_fresh_process(tmp_path):
         or (not p.is_relative_to(base) and ("/data/" in str(p) or "label" in p.name))
     ]  # fmt: skip
     assert not bad, bad
+
+
+def test_cohort_paths_write_separately_and_match_working_values(tmp_path):
+    root = make_root(tmp_path)
+    working = build(root)
+    before = (root / demand.PROCESSED / demand.OUTPUT).read_bytes()
+    cohort = root / "data/processed/cohorts/loao_KATL_v1"
+    cohort.mkdir(parents=True)
+    req = requests_fixture()
+    req["prediction_id"] = "c" + req.prediction_id
+    req.to_parquet(cohort / demand.REQUESTS)
+    (cohort / "prediction_requests.manifest.json").write_text(
+        (root / demand.PROCESSED / "prediction_requests.manifest.json").read_text()
+    )
+    manifest = demand.build(root, cohort / demand.REQUESTS, cohort)
+    assert (root / demand.PROCESSED / demand.OUTPUT).read_bytes() == before
+    out = pd.read_parquet(cohort / demand.OUTPUT).set_index("prediction_id")
+    assert manifest["inputs"]["prediction_requests"]["path"] == str(
+        cohort / demand.REQUESTS
+    )
+    features = list(demand.FEATURES)
+    pd.testing.assert_frame_equal(
+        out.loc["c" + working.index, features].set_axis(working.index),
+        working[features],
+    )
