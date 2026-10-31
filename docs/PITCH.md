@@ -7,7 +7,7 @@ Fill the `[ ]` slots from `reports/RESULTS_dev.md`. Development numbers only (20
 **2. No leakage, by construction (30 s).** Every forecast has an issue time T. Features use only METARs observed and TAFs issued by T, with runway-relative head, tail and crosswind. Splits are by time: train 2023, early stopping on H1 2024, calibration H2 2024, 2025 sealed behind a one-shot ledger. Tests show that changing data after T leaves features at T unchanged.
 
 **3. Baselines first (40 s).**
-- Throughput RMSE (touchdowns/hour, H2 2024): LightGBM `[ ]` vs climatology `[ ]`, seasonal persistence `[ ]`, schedule-only `[ ]`. Skill vs seasonal persistence `[ ]` (CI `[ ]`).
+- Throughput RMSE (touchdowns/hour, H2 2024, not used for fitting): LightGBM 6.92 / 9.17 (KATL / KDFW) vs best baseline 8.46 (schedule-only) / 11.51 (seasonal persistence), about 18–20% lower. Error is flat from 3 h to 12 h because the model leans on the schedule.
 - Severe delay: PR-AUC 0.23 (KATL) / 0.21 (KDFW) against 9% / 12% prevalence, vs conditional-rate `[ ]` and logistic `[ ]`.
 
 **4. Where it fails, and how the user knows (50 s).**
