@@ -6,8 +6,8 @@ This is the entry point for assignments and current status. The detailed executi
 
 | Person / role | Responsibility |
 |---|---|
-| Project lead (you) | Directs Agent 3; approves scientific decisions, scope and the final-test release; designates reviewers and performs manual PR merges |
-| Teammate | Directs Agent 1 and Agent 2 in separate worktrees |
+| Project lead (you) | Directs Agents 1 and 2 (flights/outcomes and weather/features); approves scientific decisions, scope and the final-test release; designates reviewers and performs manual PR merges |
+| Teammate | Directs Agent 3 (modelling, evaluation and product) |
 | Integration reviewer | Checks interfaces and evidence, arranges the required leakage audit, and recommends merge; authors do not approve their own scientific changes |
 
 Agent numbers describe software ownership, independent of which person launches an agent. A chat working as Agent 1 remains Agent 1 unless the lead explicitly reassigns it.
@@ -36,11 +36,11 @@ This is a snapshot, not a live status feed. Recheck the linked PR and branch hea
 | P10 and P12 | Accepted and recorded in `DECISIONS.md` | Keep their versions and exclusion evidence visible; do not request P10 approval again |
 | Weather tables and request-keyed weather snapshots | Merged on `main` at `9df015c`; processed snapshot/lineage files exist | Verify new cohorts, add demand, finish registry/provenance manifests and evaluate-only weather slices |
 | Snapshot lineage | Normalized `(snapshot_key, feature_group)` rows; predictions join through their snapshot row | Preserve that documented mapping; do not require an unnecessary per-prediction expansion |
-| Throughput baselines and evaluator | [PR #2](https://github.com/whiskeyboo/airbus_challenge/pull/2) open; latest review of `05f3c3c` requests changes | Fixed-path ledger, experiment/content binding and other review fixes, then an audit of the new head |
+| Throughput baselines and evaluator | [PR #2](https://github.com/whiskeyboo/airbus_challenge/pull/2) merged at `6547c72`, including follow-up guard fixes | Verify the merged fixes against review probes; retain current-head audit evidence and reproduce the approved development report for G3 |
 | Development baseline smoke run | Reviewer reported real validation results in PR #2 | Reproduce an approved development report on merged, fingerprinted inputs |
 | Flight baselines, model training, product and locked assessment | Not yet accepted as delivered | Phases 3–7 below |
 
-The earlier note saying request-keyed feature snapshots did not exist is superseded by the merged feature work. Their existence does not establish that demand features, the full registry, manifest verification or additional cohorts are complete.
+The project is mainly in Phase 2, with the Phase 3 baseline/evaluation foundation now merged. Model training (`train.py`) is not yet on `main`. The earlier note saying request-keyed feature snapshots did not exist is superseded by the merged feature work. Their existence does not establish that demand features, the full registry, manifest verification or additional cohorts are complete.
 
 ## Phases and gates
 
@@ -60,8 +60,8 @@ Phases overlap where dependencies allow. Agent 3 can build model/product fixture
 
 - **Agent 1:** Phase 2 tasks `2-A1a`–`2-A1d`: settle cohort interfaces, add their requests/labels, agree the ratio-label extension, and prepare the schedule-only drift audit.
 - **Agent 2:** `2-A2a`–`2-A2e`: verify the merged request snapshots, add schedule demand, separately gate simulated operations, complete the registry/manifests, and produce evaluation-only slices.
-- **Agent 3:** `2-A3a`–`2-A3b`, then `3-A3a`: fix PR #2's current review findings, arrange a new-head audit when the lead lifts any applicable hold, and build flight baselines on fixtures in parallel.
-- **Lead/integrator:** resolve the still-pending entries linked from `DECISIONS.md`, review PR #2 fixes, and approve explicit cohort and fit-availability contracts. P10/P12 are already settled.
+- **Agent 3:** `2-A3a`–`2-A3b`, then `3-A3a`: verify PR #2's merged review fixes, arrange the required current-head audit when the lead lifts any applicable hold, and build flight baselines on fixtures in parallel.
+- **Lead/integrator:** resolve the still-pending entries linked from `DECISIONS.md`, track the data/feature task handoffs from Agents 1 and 2, and approve explicit cohort and fit-availability contracts. Coordinate with the teammate on Agent 3's audit/development evidence. P10/P12 are already settled.
 
 ## Collaboration and delivery rules
 

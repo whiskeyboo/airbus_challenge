@@ -56,7 +56,7 @@ WP-D1 applies to label-derived preprocessing as well as model weights. The exist
 | Agent 3 | PR #2 implementation/review history and fixture evidence; any reviewer development smoke report is labelled as such |
 | Lead/reviewer | Accepted decision records and which exact producer commits/artifact hashes form the starting snapshot |
 
-**G1 exit:** merged producers regenerate with matching source scope and explicit unknowns; completed work and integration gaps are distinguished. Do not describe the existing weather snapshot writer as absent. Do not describe the still-open evaluator PR as merged or fully audited.
+**G1 exit:** merged producers regenerate with matching source scope and explicit unknowns; completed work and integration gaps are distinguished. Do not describe the existing weather snapshot writer as absent. Do not describe the merged evaluator PR as a fully accepted G3 gate without the required audit and development-report evidence.
 
 ## 4. Phase 2 — make the datasets ready for each experiment
 
@@ -100,8 +100,8 @@ Evaluate a weather-plus-schedule variant even if simulated operations are added.
 
 | Task | Work | Acceptance evidence |
 |---|---|---|
-| 2-A3a | Close PR #2's current-head review findings | Fixed ledger independent of `--reports`; experiment/content binding and duplicate-prediction-hash refusal; run-manifest fit cutoff checked; common support correct for pooled/all-horizon slices; main-level mode/row tests |
-| 2-A3b | Complete the reviewed robustness work | Request hash bound to baseline manifest; source-partial provenance visible; fallback marked degraded only after development validation; avoid duplicate hourly loads; exact score-row equality enforced |
+| 2-A3a | Verify merged PR #2 fixes against its review findings; close any remaining gaps | Fixed ledger independent of `--reports`; experiment/content binding and duplicate-prediction-hash refusal; run-manifest fit cutoff checked; common support correct for pooled/all-horizon slices; main-level mode/row tests |
+| 2-A3b | Verify and complete the reviewed robustness work | Request hash bound to baseline manifest; source-partial provenance visible; fallback marked degraded only after development validation; avoid duplicate hourly loads; exact score-row equality enforced |
 
 Request a new-head leakage audit through the lead/reviewer after fixes. Reproduce the directory-change, experiment-relabel, later-fit-cutoff, pooled-support and main-level mutation probes. Record unresolved findings with severity and owner. Do not infer acceptance from a previous audit, fixture count, or a reviewer smoke run.
 
@@ -206,7 +206,7 @@ A clean-checkout rehearsal regenerates fixture/development artifacts and loads t
 
 | Checkpoint | Agent 1 can do | Agent 2 can do | Agent 3 can do |
 |---|---|---|---|
-| Now | Cohort/ratio-label interface fixtures; stable manifests; schedule-only drift | Demand projections, registry/manifests, new-cohort snapshot tests and weather slices | PR #2 fixes; flight-baseline/model/product fixtures |
+| Now | Cohort/ratio-label interface fixtures; stable manifests; schedule-only drift | Demand projections, registry/manifests, new-cohort snapshot tests and weather slices | Verify merged PR #2 fixes/audit evidence; flight-baseline/model/product fixtures |
 | Primary G2 cleared | Reconcile primary labels and source scope; finish other cohorts | Validate demand/optional feed variants and lineage | Real primary development baselines and weather-plus-schedule training |
 | G3 cleared | Cohort/reference fit membership checks | Frozen registry and availability checks | Candidate selection, uncertainty and calibration protocol |
 | G4 approaching | Outcome disclosure/replay joins | Offline/replay parity and missing-source rehearsal | Dashboard/recommendations/explanations with development cases |
