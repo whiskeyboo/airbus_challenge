@@ -513,7 +513,8 @@ def test_label_45_46_cancelled_and_other_timestamp_quarantine():
     assert labels.availability_basis.eq("unknown").all()
 
 
-def test_requests_and_targets_end_to_end_fixture(tmp_path, monkeypatch):
+@pytest.mark.parametrize("all_cohorts", [False, True])
+def test_requests_and_targets_end_to_end_fixture(tmp_path, monkeypatch, all_cohorts):
     import json
 
     import yaml
@@ -547,6 +548,7 @@ def test_requests_and_targets_end_to_end_fixture(tmp_path, monkeypatch):
         ]
     )
     Path("data/processed").mkdir(parents=True)
+    df["in_provided_csv"] = [True, False, True]
     df.to_parquet(requests.FLIGHTS, index=False)
     requests.FLIGHTS.with_suffix(".manifest.json").write_text(
         json.dumps(
@@ -570,14 +572,16 @@ def test_requests_and_targets_end_to_end_fixture(tmp_path, monkeypatch):
         }
     )
     weather.to_parquet("data/processed/weather_observations.parquet", index=False)
-    report = requests.build()
+    report = requests.build(
+        cohorts=("all",) if all_cohorts else (requests.COHORT_VERSION,)
+    )
     req = pd.read_parquet(requests.OUTPUT)
     assert req.data_mode.eq("fixture").all()
     assert req.prediction_id.is_unique
-    assert report["rows"] == 102
+    assert report["rows"] == (310 if all_cohorts else 102)
     hourly, summary = targets.build()
     labels = pd.read_parquet(targets.LABELS)
-    assert len(labels) == 108
+    assert len(labels) == (428 if all_cohorts else 204)
     import pyarrow.parquet as pq
 
     assert set(hourly.data_mode) == {"fixture"}
@@ -589,7 +593,15 @@ def test_requests_and_targets_end_to_end_fixture(tmp_path, monkeypatch):
     assert not labels.duplicated(
         ["prediction_id", "target_kind", "label_version"]
     ).any()
-    severe = labels[labels.target_kind.eq("departure_delay_gt45")]
+    scope = labels.join(
+        req.set_index("prediction_id")[["cohort_version"]],
+        on="prediction_id",
+        validate="many_to_one",
+    )
+    severe = scope[
+        scope.target_kind.eq("departure_delay_gt45")
+        & scope.cohort_version.eq(requests.COHORT_VERSION)
+    ]
     assert severe.eligible.sum() == 4
     assert severe.y_true.dropna().tolist() == [0, 1, 0, 1]
     assert labels[labels.exclusion_reason.eq("cancelled")].y_true.isna().all()
@@ -606,7 +618,39 @@ def test_requests_and_targets_end_to_end_fixture(tmp_path, monkeypatch):
         for r in manifest["exclusion_counts"]
     )
     assert hourly[["airport_icao", "hour_start_utc"]].duplicated().sum() == 0
+    ratios = scope[scope.target_kind.eq("throughput_over_clear_weather_p95")]
+    assert set(ratios.cohort_version) == {requests.COHORT_VERSION}
+    assert len(ratios) == 96
+    assert labels.label_version.eq("0.3.0").all()
     assert summary
+    if all_cohorts:
+        originals = {
+            p: sha256(p) for p in [requests.OUTPUT, targets.HOURLY, targets.LABELS]
+        }
+        candidate = tmp_path / "candidate"
+        candidate_requests = candidate / "prediction_requests.parquet"
+        requests.build(candidate_requests, ("all",))
+        cached_hourly, _ = targets.build(
+            candidate_requests, candidate, reuse_hourly=True
+        )
+        pd.testing.assert_frame_equal(hourly, cached_hourly)
+        assert len(pd.read_parquet(candidate / "labels.parquet")) == 428
+        assert all(sha256(p) == value for p, value in originals.items())
+        cached_manifest = json.loads(
+            (candidate / "airport_hourly.manifest.json").read_text()
+        )
+        assert cached_manifest["reused_hourly_sha256"] == originals[targets.HOURLY]
+        # An empty requested cohort must not replace an existing valid candidate file.
+        df["in_provided_csv"] = False
+        df.to_parquet(requests.FLIGHTS, index=False)
+        source_path = requests.FLIGHTS.with_suffix(".manifest.json")
+        source = json.loads(source_path.read_text())
+        source["parquet_sha256"] = sha256(requests.FLIGHTS)
+        source_path.write_text(json.dumps(source))
+        previous = sha256(candidate_requests)
+        with pytest.raises(ValueError, match="No eligible requests"):
+            requests.build(candidate_requests, ("csv_only_v1",))
+        assert sha256(candidate_requests) == previous
 
 
 def test_overnight_audit_handles_unresolved_dst_with_nullable_strings():
@@ -999,3 +1043,259 @@ def test_capacity_reference_rejects_partial_training_and_missing_targets():
     assert pd.isna(out.throughput_over_clear_weather_p95.iloc[2])
     assert out.capacity_ratio_status.iloc[3] == "available"
     assert out.throughput_over_clear_weather_p95.iloc[3] == 0
+
+
+def test_cohort_membership_ids_and_holdout_roles():
+    from airbus_challenge.requests import (
+        COHORT_VERSION,
+        airport_requests,
+        cohort_definitions,
+        flight_requests,
+        select_cohorts,
+    )
+
+    df = outcome_fixture(
+        [
+            row(),
+            row(Flight_Number_Reporting_Airline="124", Cancelled="1"),
+            row(Flight_Number_Reporting_Airline="125", Diverted="1"),
+        ]
+    )
+    df["in_provided_csv"] = [True, True, False]
+    start, end = pd.Timestamp("2023-01-15T00:00Z"), pd.Timestamp("2023-01-16T00:00Z")
+    definitions = cohort_definitions(list(CONFIG["airports"]))
+    frames = [
+        flight_requests(df, list(CONFIG["airports"]), [3, 6], start, end, "fixture", c)
+        for c in definitions
+    ]
+    assert [len(f) for f in frames] == [6, 4, 6, 6]
+    assert pd.concat(frames).prediction_id.is_unique
+    assert frames[0].flight_id.tolist() == frames[2].flight_id.tolist()
+    assert set(frames[1].flight_id) == set(df.loc[df.in_provided_csv, "flight_id"])
+    for icao in CONFIG["airports"]:
+        definition = definitions[f"loao_{icao}_v1"]
+        assert icao not in definition["train_airports"]
+        assert definition["score_airports"] == [icao]
+        assert set(definition["request_airports"]) == set(CONFIG["airports"])
+        assert not definition["ratio_labels"]
+    altered = df.copy()
+    altered["cancelled"] = ~altered.cancelled
+    altered["diverted"] = ~altered.diverted
+    altered["dep_delay_min"] = 9999
+    for i, cohort in enumerate(definitions):
+        pd.testing.assert_frame_equal(
+            frames[i],
+            flight_requests(
+                altered, list(CONFIG["airports"]), [3, 6], start, end, "fixture", cohort
+            ),
+        )
+    assert list(select_cohorts(list(CONFIG["airports"]), ["all"])) == list(definitions)
+    with pytest.raises(ValueError, match="Unknown, empty or duplicate"):
+        select_cohorts(list(CONFIG["airports"]), [COHORT_VERSION, COHORT_VERSION])
+    with pytest.raises(ValueError, match="no hourly"):
+        airport_requests(
+            list(CONFIG["airports"]),
+            [3],
+            start,
+            end,
+            "fixture",
+            "fixture",
+            "csv_only_v1",
+        )
+
+
+@pytest.mark.parametrize(
+    ("status", "value", "reason", "detail"),
+    [
+        ("available", 1.5, None, None),
+        ("missing_reference", None, "missing_outcome", "missing_capacity_reference"),
+        (
+            "nonpositive_reference",
+            None,
+            "missing_outcome",
+            "nonpositive_capacity_reference",
+        ),
+    ],
+)
+def test_ratio_labels_and_holdout_normalizer_exclusion(status, value, reason, detail):
+    from airbus_challenge.requests import airport_requests
+    from airbus_challenge.targets import airport_hours, label_rows
+
+    start, end = pd.Timestamp("2023-01-15T17:00Z"), pd.Timestamp("2023-01-15T18:00Z")
+    hourly = airport_hours(
+        outcome_fixture([row()]), "KDFW", start, end, "fixture", data_mode="fixture"
+    )
+    hourly["capacity_ratio_status"] = status
+    hourly["throughput_over_clear_weather_p95"] = value
+    # Reverse cohort order to catch index misalignment in subset label construction.
+    req = pd.concat(
+        [
+            airport_requests(
+                ["KDFW"], [3], start, end, "fixture", "fixture", "loao_KATL_v1"
+            ),
+            airport_requests(["KDFW"], [3], start, end, "fixture", "fixture"),
+        ],
+        ignore_index=True,
+    )
+    labels = label_rows(
+        req,
+        pd.DataFrame(),
+        hourly,
+        data_mode="fixture",
+        ratio_target="throughput_over_clear_weather_p95",
+    )
+    assert len(labels) == 3
+    ratio = labels[labels.target_kind.eq("throughput_over_clear_weather_p95")].iloc[0]
+    assert ratio.prediction_id == req.iloc[1].prediction_id
+    assert ratio.unit == "ratio"
+    if reason is None:
+        assert ratio.eligible and ratio.y_true == value
+        assert pd.isna(ratio.exclusion_reason) and pd.isna(ratio.exclusion_detail)
+    else:
+        assert not ratio.eligible and pd.isna(ratio.y_true)
+        assert (ratio.exclusion_reason, ratio.exclusion_detail) == (reason, detail)
+
+
+def test_ratio_labels_preserve_p12_exclusion_reason():
+    from airbus_challenge.requests import airport_requests
+    from airbus_challenge.targets import airport_hours, label_rows
+
+    df = outcome_fixture([row()])
+    df["timestamp_status"] = "quarantined"
+    start, end = pd.Timestamp("2023-01-15T17:00Z"), pd.Timestamp("2023-01-15T18:00Z")
+    hourly = airport_hours(df, "KDFW", start, end, "fixture", data_mode="fixture")
+    hourly["capacity_ratio_status"] = "missing_reference"
+    hourly["throughput_over_clear_weather_p95"] = None
+    req = airport_requests(["KDFW"], [3], start, end, "fixture", "fixture")
+    labels = label_rows(
+        req,
+        pd.DataFrame(),
+        hourly,
+        data_mode="fixture",
+        ratio_target="throughput_over_clear_weather_p95",
+    )
+    assert labels.eligible.eq(False).all()
+    assert labels.exclusion_reason.eq("coverage_incomplete").all()
+    assert labels.exclusion_detail.eq("unresolved_arrival_fraction_gt_0.05").all()
+
+
+def test_indexed_outcome_lookup_preserves_labels_and_rejects_duplicates():
+    from airbus_challenge.requests import flight_requests
+    from airbus_challenge.targets import label_rows
+
+    df = outcome_fixture(
+        [row(), row(Flight_Number_Reporting_Airline="124", Cancelled="1")]
+    )
+    req = flight_requests(
+        df,
+        ["KATL"],
+        [3],
+        pd.Timestamp("2023-01-15T00:00Z"),
+        pd.Timestamp("2023-01-16T00:00Z"),
+        "fixture",
+    )
+    outcomes = df[["flight_id", "dep_delay_min", "cancelled", "scheduled_dep_utc"]]
+    normal = label_rows(req, outcomes, pd.DataFrame(), data_mode="fixture")
+    pd.testing.assert_frame_equal(
+        normal,
+        label_rows(
+            req, outcomes.set_index("flight_id"), pd.DataFrame(), data_mode="fixture"
+        ),
+    )
+    with pytest.raises(ValueError, match="Duplicate flight_id"):
+        label_rows(req, pd.concat([outcomes, outcomes]), pd.DataFrame())
+
+
+def test_schedule_drift_ignores_all_outcome_columns():
+    from airbus_challenge.requests import schedule_drift
+
+    df = outcome_fixture(
+        [
+            row(FlightDate="2024-01-15"),
+            row(
+                FlightDate="2025-01-15",
+                Flight_Number_Reporting_Airline="124",
+                Cancelled="1",
+            ),
+            row(
+                FlightDate="2025-01-15",
+                Flight_Number_Reporting_Airline="125",
+                Diverted="1",
+            ),
+        ]
+    )
+    before = schedule_drift(df, list(CONFIG["airports"]))
+    changed = df.copy()
+    changed["cancelled"] = ~changed.cancelled
+    changed["diverted"] = ~changed.diverted
+    changed["wheels_on_utc"] = pd.Timestamp("2040-01-01T00:00Z")
+    changed["dep_delay_min"] = 999999
+    assert schedule_drift(changed, list(CONFIG["airports"])) == before
+    rows = [
+        r
+        for r in before["monthly"]
+        if r["airport_icao"] == "KATL" and r["direction"] == "departure"
+    ]
+    assert [r["scheduled_flights"] for r in rows] == [1, 2]
+    assert before["year_over_year"][0]["per_day_change_fraction"] == 1
+
+
+def test_schedule_audit_reads_only_declared_schedule_columns(tmp_path, monkeypatch):
+    import json
+    import zipfile
+
+    import yaml
+
+    from airbus_challenge import requests
+    from airbus_challenge.download import sha256
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "configs").mkdir()
+    (tmp_path / "configs/airports.yaml").write_text(yaml.safe_dump(CONFIG))
+    raw_dir = tmp_path / "data/raw/bts"
+    raw_dir.mkdir(parents=True)
+    raw = pd.DataFrame(
+        [row(), row(Flight_Number_Reporting_Airline="124", Cancelled="1")]
+    )
+    path = raw_dir / "bts_2023_01.zip"
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("flights.csv", raw.to_csv(index=False))
+    df = outcome_fixture(raw.to_dict(orient="records"))
+    (tmp_path / "data/processed").mkdir()
+    df.to_parquet(requests.FLIGHTS, index=False)
+    requests.FLIGHTS.with_suffix(".manifest.json").write_text(
+        json.dumps(
+            {
+                "data_mode": "fixture",
+                "parquet_sha256": sha256(requests.FLIGHTS),
+                "sources": [{"key": "bts/bts_2023_01.zip", "sha256": sha256(path)}],
+            }
+        )
+    )
+    read_parquet, read_csv = pd.read_parquet, pd.read_csv
+    calls = []
+
+    def schedule_parquet(path, **kwargs):
+        assert kwargs["columns"] == requests.AUDIT_COLUMNS
+        calls.append("parquet")
+        return read_parquet(path, **kwargs)
+
+    def schedule_csv(path, **kwargs):
+        assert set(kwargs["usecols"]) == {
+            "FlightDate",
+            "DOT_ID_Reporting_Airline",
+            "Reporting_Airline",
+            "Origin",
+            "Dest",
+        }
+        calls.append("csv")
+        return read_csv(path, **kwargs)
+
+    monkeypatch.setattr(pd, "read_parquet", schedule_parquet)
+    monkeypatch.setattr(pd, "read_csv", schedule_csv)
+    report = requests.audit_schedules(tmp_path / "audit.json")
+    assert calls == ["parquet", "csv"]
+    assert report["data_mode"] == "fixture"
+    assert report["raw_reconciliation"].startswith("passed")
+    assert report["rows"] == 2
+    assert len(report["national_carrier_scope"]) == 1

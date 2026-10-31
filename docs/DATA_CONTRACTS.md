@@ -122,6 +122,21 @@ Required columns:
 
 A request is in scope for a split, task and `cohort_version` when its target falls in that split and `as_of_utc` is at or after the training fit cutoff. Results are never pooled across cohorts. The CSV-only comparison and each leave-one-airport-out test use their own `cohort_version`; CSV-only versions start with `csv_only`.
 
+### Approved experiment cohorts (WP-D3)
+
+Accepted by the project lead on 2026-10-31. The primary cohort remains `retrospective_schedule_v1`, with unchanged prediction IDs.
+
+| `cohort_version` | Request membership | Fitting and scoring |
+| --- | --- | --- |
+| `retrospective_schedule_v1` | Both tasks for the configured study airports | Fit and score the study airports within the declared chronological partitions |
+| `csv_only_v1` | Only sample-member (`in_provided_csv = true`) study-airport departures, task `severe_delay` | Fit/tune/calibrate/score only these members; paired cancellation labels remain separate; no hourly throughput from the sparse CSV |
+| `loao_<ICAO>_v1` | Both tasks and both study airports, including source-fitting and held-out-scoring rows | Fit only `train_airports` excluding `<ICAO>`; score only `score_airports = [<ICAO>]`; the cohort alone does not enforce consumer-side selection |
+
+The request manifest retains `parquet_sha256`, `rows`, `data_mode`, `schema_version`, producer and source hashes. Version 0.2.0 uses `cohort_versions` and a `cohorts` mapping in place of the old single `cohort_version` manifest field. Each definition records `tasks`, `request_airports`, `train_airports`, `score_airports`, flight membership and `ratio_labels`; a holdout definition additionally records `held_out_airport`. Request table columns do not change.
+
+Only `requests.py` constructs the cohort-specific IDs. Results never pool across cohorts. Models and baseline run manifests must carry the applicable `train_airports` and enforce the scoring population. CSV-only is not a primary all-BTS model merely scored on a sample subset. Strict LOAO cohorts do not receive ratio labels based on the current held-out-airport-fitted P10 normalizer.
+
+
 For flights, `target_start_utc` is the scheduled departure instant and `target_end_utc` is null. For airport tasks, it is the target hour and end is start + 1 hour. `horizon_h` must equal the target-start/as-of difference in hours.
 
 `feature_snapshots` has the same key plus typed feature columns, `feature_version`, `data_snapshot_id`, `status`, `reason_codes`, and source-age fields. The feature registry specifies type, unit, source, transform, missing policy, and serving support for each feature. It is frozen with the model.
@@ -165,10 +180,17 @@ Fields: `prediction_id`, `target_kind`, `y_true` (nullable float64), `eligible` 
 | `missing_source_month` | `coverage_incomplete` |
 | `unknown_cancellation_status` | `missing_outcome` |
 | `missing_departure_delay` | `missing_outcome` |
+| `missing_capacity_reference` | `missing_outcome` |
+| `nonpositive_capacity_reference` | `missing_outcome` |
 
 Every prediction request in scope has a label row for each target it is scored on, including excluded ones, so denominators stay visible. A table holds one `label_version`.
 
 Allowed main targets: `official_aar`, `reporting_carrier_touchdowns`, `throughput_over_clear_weather_p95`, `departure_delay_gt45`, `cancellation`. Binary outcomes must be exactly 0 or 1. Labels are outcomes, never features.
+
+WP-D4 was accepted by the project lead on 2026-10-31. Label version/schema 0.3.0 adds ratio rows with the same prediction ID as the primary raw-throughput request. Both `exclusion_reason` and `exclusion_detail` remain null iff eligible. Preserve the underlying P12 exclusion when throughput is ineligible. A missing or nonpositive reference with otherwise eligible throughput produces a null ratio with the approved details above. Unknown producer details remain hard errors. A table contains one label version and one non-null `data_mode`.
+
+Expanded cohorts/labels are first generated in a candidate directory using `requests --cohorts all --output <candidate>/prediction_requests.parquet` and `targets --requests <candidate>/prediction_requests.parquet --output-dir <candidate> --reuse-hourly`. The latter reuses the verified frozen P10 reference and records its input hash. Existing working requests/labels/features are not overwritten during this staging step. Agent 2 must regenerate matching snapshots and lineage before the lead publishes the bundle. WP-D1 (label release), WP-D2 (tolerance approval) and experiment-specific model readiness remain separate gates; constructing labels is not permission to fit or score a model.
+
 
 ## 8. Predictions and serving
 

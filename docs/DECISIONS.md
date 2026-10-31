@@ -61,19 +61,21 @@ The agents must not invent organiser answers. The humans may send these question
 
 ## Pending delivery decisions
 
-The lead-requested [phased plan](PHASE_PLAN.md#2-lead-decisions-and-dependencies) names WP-D1–WP-D7 for coordination. These are **pending**, not newly accepted domain defaults. Record the selected policy and evidence in this register before dependent real fitting or final release:
+The lead-requested [phased plan](PHASE_PLAN.md#2-lead-decisions-and-dependencies) names WP-D1–WP-D7 for coordination. Status is recorded per row; entries not explicitly marked accepted remain pending. Record the selected policy and evidence in this register before dependent real fitting or final release:
 
 | Plan ID | Decision needed | Dependency |
 |---|---|---|
 | WP-D1 | Historical label-release/unknown-availability simulation and fit-cutoff enforcement, including label-derived references | Real model and baseline/reference fitting |
 | WP-D2 | Approve or revise the proposed ±2 min timestamp reconstruction tolerance | Outcome snapshot used for real fitting and final release |
-| WP-D3 | Exact CSV/LOAO cohort membership, fitting populations and manifest semantics | Additional request/label cohorts |
-| WP-D4 | Capacity-ratio label target and approved missing-reference detail mappings | Ratio labels and downstream comparators |
+| WP-D3 | **Accepted 2026-10-31 by the project lead:** CSV-only sample-member departures and paired delay/cancellation labels; LOAO requests include source and held-out airports, with training restricted to other airports and scoring to the named held-out airport. `DATA_CONTRACTS` §6 records the versioned manifest interface. | Approved cohort production; consumer-side fit/score guards still required |
+| WP-D4 | **Accepted 2026-10-31 by the project lead:** add primary-cohort `throughput_over_clear_weather_p95` labels under `throughput`; `missing_capacity_reference` and `nonpositive_capacity_reference` map to canonical `missing_outcome`. Label schema/version 0.3.0; preserve P12 reasons and omit held-out-airport-normalized ratio labels in strict LOAO. | Approved ratio-label producer; baseline/model support remains downstream work |
 | WP-D5 | Timestamped simulated operational-feed latency, coverage and freshness policy | Operations-context features |
 | WP-D6 | Strict zero-shot transfer comparator and treatment of held-out-airport normalizers | LOAO comparison |
 | WP-D7 | Calibration/threshold assessment allocation, alert/episode policy and fallback validation criteria | Frozen calibrators, recommendations and alert metrics |
 
-P10 and P12 remain accepted. The planning PR does not reopen those decisions, lift an audit hold, approve model scores, or release the 2025 locked assessment.
+P10, P12, WP-D3 and WP-D4 are accepted. The other WP-D decisions remain pending. The planning PR does not reopen those decisions, lift an audit hold, approve model scores, or release the 2025 locked assessment.
+
+Lead execution instruction, 2026-10-31: Agent 1 is to focus on implementing and delivering features, with no further auditor or mutation-audit runs unless the lead re-enables them. Normal Ruff/pytest checks continue. No unperformed audit is claimed as completed.
 
 ## Decision entry template
 
