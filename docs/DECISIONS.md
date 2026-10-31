@@ -13,6 +13,7 @@ This is the authoritative register for decisions that change scientific meaning 
 | R05 | Severe departure delay is strictly >45 minutes | Brief, page 5 |
 | R06 | Avoid time leakage and include runway directionality | Brief, page 5 |
 | R07 | Preserve AAR/throughput distinction | FAA definition and reviewed methodological correction |
+| R08 | Train the severe-delay model on all BTS flights. The provided CSV flights, identified by `in_provided_csv`, are reported as a separate CSV-only comparison | User decision, 2026-10-31 (closes O08) |
 
 ## Proposed implementation defaults
 
@@ -48,7 +49,6 @@ Basis: `Autonomous SG 2026_Airbus Track.pdf`, Challenge 5, pages 5-6. These are 
 | O05 | Which repository, agent tools, runtime and hosting environment will be used? | Determines setup and deployment | Prepare portable interfaces; no external deployment |
 | O06 | What historical schedule/status knowledge can be evidenced? | Prevents availability overclaims | Declare retrospective simulation and exclude unsupported features |
 | O07 | Is sufficient AAR/TAF/flight coverage available for proposed partitions? | Determines defensible evaluation window | Coverage audit only; do not choose periods based on test skill |
-| O08 | Is the severe-delay model trained on all BTS flights or only the provided CSV sample? | `CLAUDE.md` names the CSV for delay labels, but it holds about 1% of hub departures | Keep an `in_provided_csv` flag so either population can be used |
 | O09 | Does the test window stop at July 2025 or cover all of 2025? | `configs/experiment.yaml` and `docs/EVALUATION_PLAN.md` differ | Follow the config; freeze before any test access |
 | O10 | Which Drive folder should `.env` use? | The current ID differs from the folder printed in the brief | Keep the current ID; the CSV is already on disk |
 

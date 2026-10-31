@@ -6,8 +6,8 @@ Brief and rubric: `docs/challenge5.md`. Who builds what: `docs/WORK_PLAN.md`. De
 Splits, horizons and targets: `configs/experiment.yaml`. Airports, headings, timezones, weather stations: `configs/airports.yaml`.
 
 ## Data sources
-- **Provided CSV** `data/raw/Flight_Data_With_Weather_Final.csv` (2023-01 to 2025-07). From a public Google Drive folder, ID in `.env` as `DATA_GDRIVE_FOLDER_ID`; `download.py` fetches it with `gdown --folder` into `data/raw/`. It is a sparse flight sample (~6 ATL arrivals/day), has no wind direction, and its weather is recorded at flight time. Use it for delay labels; never for airport counts or as weather features.
-- **BTS On-Time Performance** (full reporting-carrier flights) for hourly arrival throughput and volume.
+- **Provided CSV** `data/raw/Flight_Data_With_Weather_Final.csv` (2023-01 to 2025-07). From a public Google Drive folder, ID in `.env` as `DATA_GDRIVE_FOLDER_ID`; `download.py` fetches it with `gdown --folder` into `data/raw/`. It is a sparse flight sample (~6 ATL arrivals/day), has no wind direction, and its weather is recorded at flight time. Use it only for the separate CSV-only comparison; never for airport counts or as weather features.
+- **BTS On-Time Performance** (full reporting-carrier flights) for hourly arrival throughput, volume and severe-delay labels (`docs/DECISIONS.md` R08).
 - **IEM METAR** (observations) and **IEM TAF** (forecasts) for weather features, including wind direction.
 - Supplemental public data is in scope per the brief (`docs/DECISIONS.md` O02). Still report the CSV-only ablation separately; never splice the two into one score.
 

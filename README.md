@@ -2,7 +2,7 @@
 
 Forecasts hourly arrival throughput (AAR proxy) and severe departure-delay risk (>45 min) 3–12 h ahead for KATL and KDFW. Airbus Challenge #5, Autonomous SG 2026.
 
-No true AAR is available, so capacity here is an AAR proxy: hourly actual arrivals from BTS On-Time data, plus their ratio to a clear-weather ceiling. Weather features come from IEM METAR/TAF; the provided CSV supplies delay labels.
+No true AAR is available, so capacity here is an AAR proxy: hourly actual arrivals from BTS On-Time data, plus their ratio to a clear-weather ceiling. Weather features come from IEM METAR/TAF. Delay labels also come from BTS, and the provided CSV is scored as a separate comparison.
 
 ## Setup
 

@@ -11,13 +11,10 @@ Three agents build the pipeline in parallel, each in its own worktree and branch
 
 Do these in order, on `main`:
 
-1. Merge `feat/public-data-download`. The downloaders are finished, so no agent builds them.
-2. Merge `chore/agent-split`, which holds this plan and the ignore-rule fix.
-3. Add the two missing dependencies on a branch and merge it. Agents don't run `uv add`.
-   ```bash
-   uv add matplotlib airportsdata
-   ```
-4. Settle the proposed benign-weather rule (`docs/DECISIONS.md` P10) and the delay-model population (O08).
+1. Done: the downloaders are merged, so no agent builds them.
+2. Done: this plan and the ignore-rule fix are merged.
+3. Done: `matplotlib` and `airportsdata` are added. Agents don't run `uv add`.
+4. Settle the proposed benign-weather rule (`docs/DECISIONS.md` P10) before step 5 of the build order. This doesn't block starting.
 5. Create one worktree per agent on the machine that runs it. `.gitignore` must be updated first, or `git add -A` commits the `data` link. Run these from the main repo root; `$PWD` keeps the links absolute whatever the clone path.
    ```bash
    git worktree add ../ac-flights -b flights main
@@ -75,7 +72,7 @@ Nobody waits idle. Agent 2 builds weather parsing and wind features from step 0.
 
 ## Still open
 
-Tracked in `docs/DECISIONS.md`: P10 benign weather, O08 delay-model population, O09 test window, O10 Drive folder.
+Tracked in `docs/DECISIONS.md`: P10 benign weather, O09 test window, O10 Drive folder.
 
 ## Kickoff prompts
 
