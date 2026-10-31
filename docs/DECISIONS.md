@@ -34,7 +34,7 @@ Basis: `Autonomous SG 2026_Airbus Track.pdf`, Challenge 5, pages 5-6. These are 
 | ID | Question | Decision | Evidence in brief |
 | --- | --- | --- | --- |
 | O02 | Supplemental public data permitted? | **Yes.** BTS, IEM METAR/TAF and NOAA storm data are in scope. CSV-only results are still reported as a separate ablation. | "ingests publicly available weather observations (METARs/TAFs and NOAA storm logs)"; "Scripts that download and process public datasets automatically" |
-| O01 | Official hourly AAR available? | **No.** Nothing is supplied, so the target is the BTS arrival-throughput proxy (P05), scored by RMSE as the brief asks. Labelled "arrival throughput (AAR proxy)". | "Accurate prediction of Arrival Acceptance Rates, measured by Root Mean Squared Error"; provided data has no AAR |
+| O01 | Official hourly AAR available? | **No. Confirmed by organisers 2026-10-31:** BTS hourly arrival counts are an acceptable stand-in, RMSE in arrivals per hour. Labelled "arrival throughput (AAR proxy)". | "Accurate prediction of Arrival Acceptance Rates, measured by Root Mean Squared Error"; provided data has no AAR |
 | O04 | Live inference required? | **No.** Historical replay with an issue-time slider in the dashboard. Live is optional stretch only. | "Dashboard that displays risk scores alongside historical trends" |
 | O03 | Headings true or magnetic? | **Unspecified; use as given** and compare directly with METAR wind (true north). Documented as an assumption; error is a few degrees. | "All flights take-off and land at heading degree 80 / 180" |
 
