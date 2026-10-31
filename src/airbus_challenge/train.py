@@ -327,10 +327,213 @@ def delay_main(
     return run
 
 
+CANCEL = {**DELAY, "target": "cancellation", "model_version": "lgbm_cancellation_v1"}
+ALL_RUN_ID = "lgbm_dev"
+TOP_K = 5
+SHAP_CHUNK = 200_000
+
+
+def dev_requests(root: Path, task: str) -> pd.DataFrame:
+    lo, hi = bounds(DEV_SPLITS[0])[0], bounds(DEV_SPLITS[-1])[1]
+    t = ds.field("target_start_utc")
+    return in_scope(
+        ds.dataset(root / REQUESTS)
+        .to_table(
+            columns=baselines.REQUEST_COLUMNS,
+            filter=(ds.field("task") == task)
+            & (t >= pa.scalar(lo, pa.timestamp("us", "UTC")))
+            & (t < pa.scalar(hi, pa.timestamp("us", "UTC"))),
+        )
+        .to_pandas()
+    ).reset_index(drop=True)
+
+
+def dev_inputs(root: Path, task: str, airports: list[str]):
+    """In-scope dev requests, their assembled rows and LightGBM input frame."""
+    requests = dev_requests(root, task)
+    X = pd.concat(
+        [input_qa.assemble(task, root, s) for s in DEV_SPLITS], ignore_index=True
+    )
+    input_qa.validate_inputs(X, task, root)
+    df = requests.merge(
+        X, on="prediction_id", how="left", suffixes=("", "_x"), validate="one_to_one"
+    )
+    return requests, df, model_frame(df[registry.model_inputs(task)], airports)
+
+
+def shap_drivers(
+    model, feats: pd.DataFrame, ids: pd.Series, target: str, scale: str
+) -> pd.DataFrame:
+    """Top TOP_K features by |SHAP| per row (LightGBM pred_contrib), computed in chunks."""
+    names = np.array(feats.columns)
+    parts = []
+    for start in range(0, len(feats), SHAP_CHUNK):
+        chunk = feats.iloc[start : start + SHAP_CHUNK]
+        contrib = model.predict(
+            chunk, num_iteration=model.best_iteration, pred_contrib=True
+        )[:, :-1]
+        top = np.argsort(-np.abs(contrib), axis=1)[:, :TOP_K]
+        rows = np.repeat(np.arange(len(chunk)), TOP_K)
+        cols = top.ravel()
+        values = chunk.to_numpy(dtype=object)[rows, cols]
+        parts.append(
+            pd.DataFrame(
+                {
+                    "prediction_id": ids.iloc[start : start + SHAP_CHUNK].to_numpy()[
+                        rows
+                    ],
+                    "target_kind": target,
+                    "feature": names[cols],
+                    "value": [None if pd.isna(v) else str(v) for v in values],
+                    "contribution": contrib[rows, cols].astype("float64"),
+                    "contribution_scale": scale,
+                }
+            )
+        )
+    return pd.concat(parts, ignore_index=True)
+
+
+def binary_metrics(preds: pd.DataFrame, labels_path: Path, target: str) -> list[dict]:
+    from sklearn.metrics import average_precision_score, brier_score_loss
+
+    lab = training_labels(labels_path, preds["prediction_id"].tolist(), target)
+    scored = preds.merge(lab, on="prediction_id")
+    scored["split"] = np.where(
+        scored.target_start_utc < bounds("calibration")[0], "validation", "calibration"
+    )
+    return [
+        {"split": sp, "airport": a, "n_eligible": len(g), "prevalence": float(g.y_true.mean()),
+         "pr_auc": float(average_precision_score(g.y_true, g.estimate)),
+         "brier": float(brier_score_loss(g.y_true, g.estimate))}
+        for (sp, a), g in scored.groupby(["split", "airport_icao"])
+    ]  # fmt: skip
+
+
+def all_main(
+    root: Path = Path("."), artifacts: Path = ARTIFACTS, labels_path: Path = LABELS
+) -> Path:
+    """One run with throughput (point + p10/p90), severe delay and cancellation, plus boosters
+    and per-prediction SHAP drivers. Same params, seeds and subsamples as the separate runs."""
+    airports = list(
+        yaml.safe_load((root / "configs/airports.yaml").read_text())["airports"]
+    )
+    run = artifacts / ALL_RUN_ID
+    run.mkdir(parents=True, exist_ok=True)
+    snapshot_id = min(
+        set(
+            ds.dataset(root / registry.PROCESSED / registry.WEATHER_TABLE)
+            .to_table(columns=["data_snapshot_id"]).column(0).to_pylist()
+        )
+    )  # fmt: skip
+    now = datetime.now(UTC)
+    # Throughput.
+    tX, ty = labelled("train", root, airports, labels_path)
+    vX, vy = labelled("validation", root, airports, labels_path)
+    tp_models = [
+        fit(tX, ty, vX, vy),
+        fit(tX, ty, vX, vy, {"objective": "quantile", "alpha": 0.1}),
+        fit(tX, ty, vX, vy, {"objective": "quantile", "alpha": 0.9}),
+    ]
+    tp_req, tp_df, tp_feats = dev_inputs(root, TASK, airports)
+    tp_x = tp_df[["prediction_id", *registry.model_inputs(TASK), *input_qa.STATUS]]
+    frames = [predictions_frame(tp_req, tp_x, tp_models, airports)]
+    drivers = [
+        shap_drivers(
+            tp_models[0], tp_feats, tp_req["prediction_id"], TARGET, "touchdowns/h"
+        )
+    ]
+    best = {"throughput": [m.best_iteration for m in tp_models]}
+    tp_models[0].save_model(run / f"model_{TARGET}.txt")
+    del tX, vX
+    # Severe delay and cancellation share the flight requests and inputs.
+    req, df, feats = dev_inputs(root, DELAY["task"], airports)
+    ok = df["status"].eq("ok") & df["demand_status"].eq("ok")
+    reasons = [
+        sorted(set(a) | set(b))
+        for a, b in zip(df["reason_codes"], df["demand_reason_codes"])
+    ]
+    metrics, sizes = {}, {}
+    for spec in (DELAY, CANCEL):
+        args = (root, airports, labels_path, spec["task"], spec["target"])
+        trX, trY = labelled("train", *args, sample=spec["train_sample"])
+        vaX, vaY = labelled("validation", *args, sample=spec["val_sample"])
+        model = fit(trX, trY, vaX, vaY, {"objective": "binary"})
+        del trX, vaX
+        model.save_model(run / f"model_{spec['target']}.txt")
+        best[spec["target"]] = model.best_iteration
+        sizes[spec["target"]] = {"train": len(trY), "validation": len(vaY)}
+        frames.append(
+            req[baselines.REQUEST_COLUMNS].assign(
+                target_kind=spec["target"],
+                estimate=model.predict(feats, num_iteration=model.best_iteration),
+                p10=np.nan,
+                p90=np.nan,
+                unit=spec["unit"],
+                status=np.where(ok, "available", "degraded"),
+                reason_codes=reasons,
+                model_version=spec["model_version"],
+                feature_version=registry.REGISTRY_VERSION,
+            )
+        )
+        drivers.append(
+            shap_drivers(model, feats, req["prediction_id"], spec["target"], "log-odds")
+        )
+        metrics[spec["target"]] = binary_metrics(
+            frames[-1], labels_path, spec["target"]
+        )
+    preds = pd.concat(frames, ignore_index=True).assign(
+        data_snapshot_id=snapshot_id, generated_at_utc=now
+    )
+    baselines.write_predictions(preds, run / "predictions.parquet")
+    pd.concat(drivers, ignore_index=True).to_parquet(
+        run / "shap_drivers.parquet", index=False
+    )
+    manifest = {
+        "run_id": ALL_RUN_ID,
+        "producer": "airbus_challenge.train",
+        "model_versions": sorted(preds["model_version"].unique()),
+        "targets": sorted(preds["target_kind"].unique()),
+        "commit": baselines.git("rev-parse", "HEAD"),
+        "commit_dirty": baselines.source_dirty(),
+        "data_mode": str(preds["data_mode"].iloc[0]),
+        "data_snapshot_id": snapshot_id,
+        "fit_split": "train",
+        "early_stopping_split": "validation",
+        "fit_cutoff_utc": cutoff().isoformat(),
+        "prediction_requests_sha256": sha256(root / REQUESTS),
+        "train_airports": airports,
+        "registry_sha256": registry.to_json(registry.build())["content_sha256"],
+        "params": PARAMS,
+        "binary_objective": "binary",
+        "best_iteration": best,
+        "subsample_rows": sizes,
+        "shap": {
+            "method": "lightgbm pred_contrib",
+            "top_k": TOP_K,
+            "scales": {"throughput": "touchdowns/h", "binary": "log-odds"},
+            "note": "associations, not causes",
+        },
+        "rows_by_target": preds["target_kind"].value_counts().to_dict(),
+        "status_counts": preds.groupby("target_kind")["status"]
+        .value_counts()
+        .unstack(fill_value=0)
+        .to_dict("index"),
+        "dev_metrics_not_via_evaluator": metrics,
+    }
+    (run / "manifest.json").write_text(json.dumps(manifest, indent=2, default=str))
+    print(run, manifest["rows_by_target"], best)
+    for t, m in metrics.items():
+        print(t)
+        print(pd.DataFrame(m).round(4).to_string(index=False))
+    return run
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--task", choices=["throughput", "severe_delay"], default="throughput"
+        "--task", choices=["throughput", "severe_delay", "all"], default="throughput"
     )
+    parser.add_argument("--artifacts", type=Path, default=ARTIFACTS)
     args = parser.parse_args()
-    main() if args.task == "throughput" else delay_main()
+    run = {"throughput": main, "severe_delay": delay_main, "all": all_main}[args.task]
+    run(artifacts=args.artifacts)
