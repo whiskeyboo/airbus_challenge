@@ -1217,7 +1217,21 @@ def exclusion_audit(hourly, flights, experiment, weather):
     }
 
 
-def build(requests_path=None, output_dir=None, reuse_hourly=False):
+TASK_TARGETS = {
+    "severe_delay": {"departure_delay_gt45", "cancellation"},
+    "throughput": {"reporting_carrier_touchdowns", "throughput_over_clear_weather_p95"},
+}
+
+
+def build(requests_path=None, output_dir=None, reuse_hourly=False, target_kinds=None):
+    # target_kinds writes a named subset (e.g. ratio-only) to a separate output_dir.
+    if target_kinds is not None and (
+        not target_kinds or set(target_kinds) - set().union(*TASK_TARGETS.values())
+    ):
+        raise ValueError(f"Unknown or empty target_kinds: {target_kinds}")
+    if target_kinds is not None and output_dir is None:
+        raise ValueError("A target_kinds subset must not replace the working labels")
+    tasks = {t for t, kinds in TASK_TARGETS.items() if kinds & set(target_kinds or [])}
     requests_path = Path(requests_path) if requests_path is not None else REQUESTS
     output_dir = Path(output_dir) if output_dir is not None else None
     hourly_path = output_dir / "airport_hourly.parquet" if output_dir else HOURLY
@@ -1434,6 +1448,10 @@ def build(requests_path=None, output_dir=None, reuse_hourly=False):
                 raise ValueError("Requests table data_mode must match its manifest")
             if not requests.cohort_version.isin(definitions).all():
                 raise ValueError("Request cohort is absent from its manifest")
+            if target_kinds is not None:
+                requests = requests.loc[requests.task.isin(tasks)]
+                if requests.empty:
+                    continue
             labels = label_rows(
                 requests,
                 outcomes,
@@ -1443,6 +1461,8 @@ def build(requests_path=None, output_dir=None, reuse_hourly=False):
                 ratio_target=experiment["targets"]["capacity_ratio"],
                 availability=timing,
             )
+            if target_kinds is not None:
+                labels = labels.loc[labels.target_kind.isin(target_kinds)]
             writer.write_table(
                 pa.Table.from_pandas(labels, schema=LABEL_SCHEMA, preserve_index=False)
             )
@@ -1529,6 +1549,7 @@ def build(requests_path=None, output_dir=None, reuse_hourly=False):
         {
             "schema_version": LABEL_VERSION,
             "source_requests_sha256": request_manifest["parquet_sha256"],
+            "target_kinds": sorted(target_kinds) if target_kinds else "all",
             "summary": summary,
             "label_denominators_sha256": sha256(denominator_path),
             "exclusion_counts": exclusion_counts,
@@ -1575,6 +1596,7 @@ if __name__ == "__main__":
     parser.add_argument("--fit-cutoff-utc")
     parser.add_argument("--hourly", type=Path, default=HOURLY)
     parser.add_argument("--feed-latency-min", type=int)
+    parser.add_argument("--target-kinds", nargs="+")
     args = parser.parse_args()
     if args.operational_feed_only:
         build_operational_feed(args.hourly, args.output_dir, args.feed_latency_min)
@@ -1587,4 +1609,4 @@ if __name__ == "__main__":
             args.output_dir,
         )
     else:
-        build(args.requests, args.output_dir, args.reuse_hourly)
+        build(args.requests, args.output_dir, args.reuse_hourly, args.target_kinds)

@@ -5,6 +5,7 @@ source list, the schedule columns of airport_hourly and configs/. No outcome col
 (realised movements, ratios, label or flight-archive tables) is read. Lagged operations are out of scope.
 """
 
+import argparse
 import collections
 import hashlib
 import json
@@ -267,23 +268,31 @@ def peak_rss_mb() -> float:
     return rss / 1e6 if sys.platform == "darwin" else rss / 1e3
 
 
-def build(root: Path = Path(".")) -> dict:
+def build(
+    root: Path = Path("."),
+    requests_path: Path | None = None,
+    output_dir: Path | None = None,
+) -> dict:
+    # A cohort passes its own requests file and output_dir; the hourly schedule stays shared.
     t0 = time.time()
     processed = root / PROCESSED
+    requests_path = Path(requests_path or processed / REQUESTS)
+    output_dir = Path(output_dir or processed)
+    output_dir.mkdir(parents=True, exist_ok=True)
     airports = yaml.safe_load((root / "configs/airports.yaml").read_text())["airports"]
     splits = yaml.safe_load((root / "configs/experiment.yaml").read_text())["splits"]
     train = tuple(pd.Timestamp(splits["train"][k], tz="UTC") for k in ("start", "end"))
     request_manifest = json.loads(
-        (processed / REQUESTS).with_suffix(".manifest.json").read_text()
+        requests_path.with_suffix(".manifest.json").read_text()
     )
     months = source_months(request_manifest)
     hourly = _read(processed / HOURLY, HOURLY_COLUMNS)
     per_hour, normaliser = hourly_features(hourly, airports, months, train)
 
-    requests = ds.dataset(processed / REQUESTS)
+    requests = ds.dataset(requests_path)
     target = requests.to_table(columns=["target_start_utc"]).column(0).to_pandas()
     first, last = target.min(), target.max()
-    out_path = processed / OUTPUT
+    out_path = output_dir / OUTPUT
     tmp = out_path.with_name(f".{OUTPUT}.tmp")
     writer, counts, reasons, status = (
         None,
@@ -296,7 +305,7 @@ def build(root: Path = Path(".")) -> dict:
     for m0 in pd.date_range(first.floor("D").replace(day=1), last, freq="MS"):
         m1 = m0 + pd.DateOffset(months=1)
         req = _read(
-            processed / REQUESTS,
+            requests_path,
             REQUEST_COLUMNS,
             (field >= utc_scalar(m0)) & (field < utc_scalar(m1)),
         )
@@ -364,6 +373,7 @@ def build(root: Path = Path(".")) -> dict:
         "source_months": sorted(months),
         "inputs": {
             "prediction_requests": {
+                "path": str(requests_path),
                 "columns": REQUEST_COLUMNS,
                 "parquet_sha256": request_manifest.get("parquet_sha256"),
             },
@@ -381,7 +391,11 @@ def build(root: Path = Path(".")) -> dict:
 
 
 if __name__ == "__main__":
-    m = build()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--requests", type=Path, help="cohort requests file")
+    parser.add_argument("--output-dir", type=Path, help="cohort output directory")
+    args = parser.parse_args()
+    m = build(requests_path=args.requests, output_dir=args.output_dir)
     print(
         json.dumps(
             {

@@ -691,6 +691,42 @@ def test_requests_and_targets_end_to_end_fixture(tmp_path, monkeypatch, all_coho
             (candidate / "airport_hourly.manifest.json").read_text()
         )
         assert cached_manifest["reused_hourly_sha256"] == originals[targets.HOURLY]
+        # Per-cohort requests and a ratio-only label subset never touch working files.
+        primary_req = req[req.cohort_version.eq(requests.COHORT_VERSION)]
+        cohorts = {}
+        for name in ("csv_only_v1", "loao_KATL_v1"):
+            path = tmp_path / "cohorts" / name / "prediction_requests.parquet"
+            requests.build(path, (name,))
+            cohorts[name] = pd.read_parquet(path)
+            assert set(cohorts[name].cohort_version) == {name}
+            assert not set(cohorts[name].prediction_id) & set(primary_req.prediction_id)
+            in_all = req[req.cohort_version.eq(name)].sort_values("prediction_id")
+            pd.testing.assert_frame_equal(
+                cohorts[name].sort_values("prediction_id").reset_index(drop=True),
+                in_all.reset_index(drop=True),
+            )
+        assert set(cohorts["csv_only_v1"].task) == {"severe_delay"}
+        loao = cohorts["loao_KATL_v1"].drop(columns=["prediction_id", "cohort_version"])
+        primary = primary_req.drop(columns=["prediction_id", "cohort_version"])
+        pd.testing.assert_frame_equal(
+            loao.sort_values(list(loao.columns)).reset_index(drop=True),
+            primary.sort_values(list(primary.columns)).reset_index(drop=True),
+        )
+        ratio_target = "throughput_over_clear_weather_p95"
+        with pytest.raises(ValueError, match="working labels"):
+            targets.build(requests.OUTPUT, target_kinds=[ratio_target])
+        ratio_dir = tmp_path / "ratio_primary"
+        targets.build(
+            requests.OUTPUT, ratio_dir, reuse_hourly=True, target_kinds=[ratio_target]
+        )
+        ratio_labels = pd.read_parquet(ratio_dir / "labels.parquet")
+        pd.testing.assert_frame_equal(
+            ratio_labels.reset_index(drop=True),
+            labels[labels.target_kind.eq(ratio_target)].reset_index(drop=True),
+        )
+        ratio_manifest = json.loads((ratio_dir / "labels.manifest.json").read_text())
+        assert ratio_manifest["target_kinds"] == [ratio_target]
+        assert all(sha256(p) == value for p, value in originals.items())
         # An empty requested cohort must not replace an existing valid candidate file.
         df["in_provided_csv"] = False
         df.to_parquet(requests.FLIGHTS, index=False)

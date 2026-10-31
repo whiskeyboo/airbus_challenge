@@ -204,7 +204,7 @@ def build(output=None, cohorts=(COHORT_VERSION,)):
         "|".join(s["sha256"] for s in source_manifest["sources"]).encode()
     ).hexdigest()
     output.parent.mkdir(parents=True, exist_ok=True)
-    tmp = output.with_name(".prediction_requests.parquet.tmp")
+    tmp = output.with_name(f".{output.name}.tmp")
     report = {
         "schema_version": VERSION,
         "producer": f"airbus_challenge.requests/{VERSION}",
@@ -270,7 +270,7 @@ def build(output=None, cohorts=(COHORT_VERSION,)):
     report["parquet_sha256"] = sha256(tmp)
     tmp.replace(output)
     mpath = output.with_suffix(".manifest.json")
-    temp = mpath.with_name(".prediction_requests.manifest.json.tmp")
+    temp = mpath.with_name(f".{mpath.name}.tmp")
     temp.write_text(json.dumps(report, indent=2))
     temp.replace(mpath)
     print(output, report["rows"], "requests", report["counts"])
