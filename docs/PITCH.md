@@ -12,6 +12,7 @@ Fill the `[ ]` slots from `reports/RESULTS_dev.md`. Development numbers only (20
 
 **4. Where it fails, and how the user knows (50 s).**
 - Severe delay cannot single out flights. WP-D7 requires 50% precision to "act": never reached. KDFW "watch" reaches 30% precision with 7% recall (about 74 flags a day); KATL reaches neither. The product says so and abstains instead of alerting.
+- Throughput "act" against the clear-weather ceiling fires on about 56% of hours: it mostly flags quiet hours. Say so; the fix is a schedule-relative rule.
 - Weather-slice results: thunderstorm hours `[ ]` vs clear hours `[ ]`. Bad weather is about 2% of hours, so these intervals are wide.
 - One worst miss from `failure_cases_dev.json`: what was known at T, and whether an advisory was possible.
 - Every forecast carries `status` and `reason_codes`. Missing or stale weather is shown, never imputed silently.
