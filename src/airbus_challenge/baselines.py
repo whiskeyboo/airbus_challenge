@@ -22,11 +22,10 @@ LOCKED_LEDGER = Path("reports/locked_runs")
 
 TARGET = EXPERIMENT["targets"]["throughput"]
 TARGET_LABEL = "arrival throughput (AAR proxy)"
-TASK = "airport_throughput"
+TASK = "throughput"
 UNIT = "touchdowns/hour"
 VERSION = "baseline-v1"
 SCHEMA_VERSION = "0.1.0"
-COMPLETE = "complete_for_source_scope"
 HOUR = pd.Timedelta(hours=1)
 WEEK = pd.Timedelta(days=7)
 # A thinner airport x local hour x weekday cell uses airport x local hour.
@@ -98,7 +97,8 @@ def in_split(df: pd.DataFrame, name: str, column: str) -> pd.DataFrame:
 
 
 def observed(hourly: pd.DataFrame) -> pd.DataFrame:
-    return hourly[hourly["coverage_status"].eq(COMPLETE) & hourly[TARGET].notna()]
+    # P12: a partial hour with a target is valid, and these cluster in bad weather.
+    return hourly[hourly["coverage_status"].ne("missing") & hourly[TARGET].notna()]
 
 
 def _local_time(df: pd.DataFrame, column: str) -> pd.DataFrame:

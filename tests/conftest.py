@@ -54,7 +54,7 @@ def make_requests(icao, targets, horizons=(3, 6, 9, 12)) -> pd.DataFrame:
             + "|"
             + d["horizon_h"].astype(str)
         ),
-        task="airport_throughput",
+        task="throughput",
         airport_icao=icao,
         flight_id=None,
         as_of_utc=lambda d: (

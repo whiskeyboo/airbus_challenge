@@ -118,6 +118,8 @@ Generate a complete UTC hour grid, not just hours with records. Use zero only wh
 Required columns:
 `prediction_id`, `task`, `airport_icao`, `flight_id?`, `as_of_utc`, `target_start_utc`, `target_end_utc`, `horizon_h`, `schedule_snapshot_id?`, `cohort_version`, `data_mode`.
 
+`task` is one of `throughput`, `severe_delay`.
+
 A request is in scope for a split, task and `cohort_version` when its target falls in that split and `as_of_utc` is at or after the training fit cutoff. Results are never pooled across cohorts. The CSV-only comparison and each leave-one-airport-out test use their own `cohort_version`.
 
 For flights, `target_start_utc` is the scheduled departure instant and `target_end_utc` is null. For airport tasks, it is the target hour and end is start + 1 hour. `horizon_h` must equal the target-start/as-of difference in hours.
@@ -145,9 +147,18 @@ Weather `reason_codes` (policies in `docs/DECISIONS.md` P13-P15):
 Path: `data/labels/labels.parquet`.
 Key: `(prediction_id, target_kind, label_version)`.
 
-Fields: `prediction_id`, `target_kind`, `y_true` (nullable float64), `eligible` (bool), `exclusion_reason` (nullable string), `outcome_available_at_utc` (nullable timestamp), `availability_basis`, `label_source`, `label_version`, `unit`, `data_mode` (`real` or `fixture`, required; one value per table).
+Fields: `prediction_id`, `target_kind`, `y_true` (nullable float64), `eligible` (bool), `exclusion_reason` (nullable string), `exclusion_detail` (nullable string), `outcome_available_at_utc` (nullable timestamp), `availability_basis`, `label_source`, `label_version`, `unit`, `data_mode` (`real` or `fixture`, required; one value per table).
 
-`exclusion_reason` is null exactly when `eligible` is true. Otherwise it is one of `cancelled`, `coverage_incomplete`, `missing_outcome`, `quarantined`.
+`exclusion_reason` is null exactly when `eligible` is true. Otherwise it is one of `cancelled`, `coverage_incomplete`, `missing_outcome`, `quarantined`. `exclusion_detail` holds the producer's specific reason and follows the same null rule; evaluators don't validate its values.
+
+| `exclusion_detail` | `exclusion_reason` |
+| --- | --- |
+| `cancelled` | `cancelled` |
+| `timestamp_quarantined` | `quarantined` |
+| `unresolved_arrival_fraction_gt_0.05` | `coverage_incomplete` |
+| `missing_source_month` | `coverage_incomplete` |
+| `unknown_cancellation_status` | `missing_outcome` |
+| `missing_departure_delay` | `missing_outcome` |
 
 Every prediction request in scope has a label row for each target it is scored on, including excluded ones, so denominators stay visible. A table holds one `label_version`.
 

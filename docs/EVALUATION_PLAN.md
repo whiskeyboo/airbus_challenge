@@ -25,7 +25,7 @@ Airport baselines: training climatology by airport/local hour/weekday with a doc
 
 Do not present official-AAR persistence if no historically available AAR feed exists. Distinguish a retrospective oracle benchmark from an implementable baseline. Baselines and candidate models share feature availability assumptions and evaluation rows.
 
-Flight baselines: historical conditional rate and logistic regression; separate cancellation baseline. Fit rates on training only, with smoothing and fallbacks for rare groups.
+Flight baselines: historical conditional rate (`baseline_conditional_rate_v1`) and logistic regression (`baseline_logistic_v1`); separate cancellation baseline. Fit rates on training only, with smoothing and fallbacks for rare groups.
 
 Ablations: schedule/calendar -> add past observations -> add archived forecasts -> add runway-relative components -> add operational context. Compare at each horizon. Do not use test ablations to choose the model.
 
@@ -44,7 +44,7 @@ Model variants: pooled versus separate horizons; pooled versus per-airport model
 
 Baseline skill for a nonzero baseline RMSE: `1 - RMSE_model / RMSE_baseline`. Negative skill is allowed. Undefined metrics are null with an explanation.
 
-Report airport x horizon results, then macro-average across airports and separately show volume-weighted aggregates. Compare delay rates or expected severely delayed departures per 100 scheduled flights; do not compare raw total delay minutes as if airport sizes were equal.
+Report airport x horizon results first: per-airport RMSE is the headline metric. Then macro-average across airports and show pooled aggregates, which are airport-hour weighted and labelled as such. Compare delay rates or expected severely delayed departures per 100 scheduled flights; do not compare raw total delay minutes as if airport sizes were equal.
 
 Use actual denominators. Conditional severe-delay probabilities must not be described as probabilities over all scheduled flights. For airport cohorts with zero scheduled departures, the rate is undefined, not zero.
 
@@ -64,7 +64,7 @@ Train ATL -> test DFW, then reverse, with no destination-airport fitting, scalin
 
 Two airports support a limited transfer stress test, not global validation. Unknown-airport configuration acceptance is a software portability test, not evidence of forecast skill.
 
-Estimate metric uncertainty by resampling days or storm episodes to respect correlation. Repeated horizons and adjacent hours are not independent samples. State the block definition and number of resamples (proposed 1,000; confirm compute cost). Calibration has no automatic guarantee under distribution shift: check coverage by airport/horizon/weather.
+Estimate metric uncertainty by resampling days or storm episodes to respect correlation. Repeated horizons and adjacent hours are not independent samples. State the block definition and number of resamples (proposed 1,000; confirm compute cost). Bootstrap days run from 08:00 UTC, so evening storm hours stay in one block. Calibration has no automatic guarantee under distribution shift: check coverage by airport/horizon/weather.
 
 ## 6. Locked-run manifest
 

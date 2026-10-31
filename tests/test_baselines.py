@@ -81,12 +81,28 @@ def test_persistence_changes_with_the_last_complete_hour(hourly):
     assert persistence(requests, hourly)["estimate"].item() == 999 != before
 
 
-@pytest.mark.parametrize("coverage", ["partial", "missing"])
-def test_persistence_is_unavailable_when_source_hour_is_incomplete(hourly, coverage):
+def test_persistence_uses_a_partial_hour_with_a_target(hourly):
+    source = airport_rows(
+        hourly, "KATL", hourly["hour_start_utc"].eq(ts("2024-03-05 11:00"))
+    )
+    hourly.loc[source, "coverage_status"] = "partial"
+    hourly.loc[source, TARGET] = 7
+    result = persistence(make_requests("KATL", [ts(UTC_TIME)], [3]), hourly).iloc[0]
+    assert (result["estimate"], result["status"]) == (7, "available")
+
+
+@pytest.mark.parametrize(
+    ("coverage", "target"),
+    [("partial", pd.NA), ("missing", 7), ("complete_for_source_scope", pd.NA)],
+)
+def test_persistence_is_unavailable_when_source_hour_is_incomplete(
+    hourly, coverage, target
+):
     source = airport_rows(
         hourly, "KATL", hourly["hour_start_utc"].eq(ts("2024-03-05 11:00"))
     )
     hourly.loc[source, "coverage_status"] = coverage
+    hourly.loc[source, TARGET] = target
     result = persistence(make_requests("KATL", [ts(UTC_TIME)], [3]), hourly).iloc[0]
     assert np.isnan(result["estimate"])
     assert result["status"] == "unavailable"
@@ -364,10 +380,21 @@ def test_requests_issued_before_the_fit_cutoff_are_not_scored(hourly):
     assert set(predictions["horizon_h"]) == {3, 6, 9}
 
 
+def test_fits_use_partial_hours_with_a_target_and_skip_null_ones(hourly):
+    in_train = hourly["hour_start_utc"].between(ts("2023-05-01"), ts("2023-06-01"))
+    hourly.loc[in_train, "coverage_status"] = "partial"
+    used = fit_climatology(train_rows(hourly))
+    hourly.loc[in_train, TARGET] = 999
+    assert not fit_climatology(train_rows(hourly))["hour"].equals(used["hour"])
+    hourly.loc[in_train, TARGET] = pd.NA
+    rows = train_rows(hourly)
+    assert not rows["hour_start_utc"].between(ts("2023-05-01"), ts("2023-06-01")).any()
+
+
 def test_fits_skip_incomplete_train_hours(hourly):
     requests = _sample_requests()
     in_train = hourly["hour_start_utc"].between(ts("2023-05-01"), ts("2023-06-01"))
-    hourly.loc[in_train, "coverage_status"] = "partial"
+    hourly.loc[in_train, "coverage_status"] = "missing"
     before, fit_before = baseline_predictions(hourly, requests)
     hourly.loc[in_train, TARGET] = 999
     after, fit_after = baseline_predictions(hourly, requests)
@@ -518,7 +545,7 @@ def test_outcomes_load_only_after_the_claim(hourly, tmp_path, clean_git, monkeyp
         (lambda h, r: (h.drop(index=100), r), "hour grid has gaps"),
         (lambda h, r: (pd.concat([h, h.iloc[[0]]]), r), "duplicate airport hour"),
         (lambda h, r: (h, r.assign(horizon_h=4)), "horizon_h"),
-        (lambda h, r: (h, r.assign(task="other")), "no airport_throughput"),
+        (lambda h, r: (h, r.assign(task="other")), "no throughput"),
         (lambda h, r: (h, pd.concat([r, r.iloc[[0]]])), "duplicate prediction_id"),
     ],
     ids=["gap", "duplicate_hour", "horizon", "no_requests", "duplicate_request"],
@@ -796,13 +823,13 @@ def test_hour_grid_gap_is_rejected(hourly):
 
 
 def test_unknown_task_is_rejected(hourly):
-    with pytest.raises(ValueError, match="no airport_throughput requests"):
+    with pytest.raises(ValueError, match="no throughput requests"):
         baseline_predictions(hourly, _sample_requests().assign(task="other"))
 
 
 def test_main_writes_contract_schema_and_fixture_manifest(hourly, tmp_path):
     target = hourly["hour_start_utc"].eq(ts("2024-03-01 08:00"))  # h=3 source hour.
-    hourly.loc[target, "coverage_status"] = "partial"
+    hourly.loc[target, "coverage_status"] = "missing"
     inputs = write_inputs(hourly, _sample_requests(), tmp_path)
 
     path = main(*inputs, tmp_path / "artifacts")

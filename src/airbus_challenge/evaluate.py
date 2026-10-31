@@ -47,7 +47,8 @@ TARGET_LABELS = {
 }
 PERSISTENCE = "baseline_persistence_v1"
 CLIMATOLOGY = "baseline_climatology_v1"
-REQUIRED_BASELINES = (PERSISTENCE, CLIMATOLOGY)
+CONDITIONAL_RATE = "baseline_conditional_rate_v1"
+LOGISTIC = "baseline_logistic_v1"
 ASSUMPTIONS = {SIMULATED_FEED, RETROSPECTIVE_SCHEDULE}
 EXCLUSION_REASONS = {
     "cancelled",
@@ -109,12 +110,20 @@ BASELINE_COLOURS = {
     CLIMATOLOGY: "#1baf7a",
     "baseline_seasonal_persistence_v1": "#eda100",
     "baseline_schedule_v1": "#e87ba4",
+    CONDITIONAL_RATE: "#1baf7a",
+    LOGISTIC: "#eb6834",
 }
 CANDIDATE_COLOURS = ["#2a78d6", "#008300", "#6250d6"]
 SURFACE = "#fcfcfb"
 INK = "#0b0b0b"
 MUTED_INK = "#52514e"
 GRID = "#e6e5e1"
+
+
+def required_baselines(target: str) -> tuple[str, str]:
+    return (
+        (CONDITIONAL_RATE, LOGISTIC) if target in BINARY else (PERSISTENCE, CLIMATOLOGY)
+    )
 
 
 def is_baseline(models: pd.Series) -> pd.Series:
@@ -199,6 +208,15 @@ def check_requests(predictions: pd.DataFrame, requests: pd.DataFrame) -> None:
             )
 
 
+def check_same_rows(predictions: pd.DataFrame) -> None:
+    # Models and baselines must share one fit cutoff and one scored row set.
+    keys = ["split", "task", "cohort_version", "target_kind"]
+    for scope, frame in predictions.groupby(keys):
+        rows = frame.groupby("model_version")["prediction_id"].agg(set)
+        if any(ids != rows.iloc[0] for ids in rows):
+            raise ValueError(f"{scope}: models cover different rows")
+
+
 def check_baselines(predictions: pd.DataFrame) -> None:
     usable = predictions[predictions["estimate"].notna()]
     for cell, frame in usable.groupby(CELL):
@@ -206,10 +224,11 @@ def check_baselines(predictions: pd.DataFrame) -> None:
         candidates = ids[~is_baseline(ids.index.to_series())]
         if candidates.empty:
             continue
-        missing = set(REQUIRED_BASELINES) - set(ids.index)
+        required = required_baselines(cell[2])
+        missing = set(required) - set(ids.index)
         if missing:
             raise ValueError(f"{cell}: a model needs baselines {sorted(missing)}")
-        shared = ids[PERSISTENCE] & ids[CLIMATOLOGY]
+        shared = ids[required[0]] & ids[required[1]]
         for model, rows in candidates.items():
             if not rows & shared:
                 raise ValueError(f"{cell}: {model} shares no row with both baselines")
@@ -282,6 +301,8 @@ def load_labels(path: Path, prediction_ids: list[str]) -> pd.DataFrame:
     labels = pd.read_parquet(path, filters=[("prediction_id", "in", prediction_ids)])
     if labels["eligible"].eq(labels["exclusion_reason"].notna()).any():
         raise ValueError("exclusion_reason must be null exactly when eligible")
+    if labels["eligible"].eq(labels["exclusion_detail"].notna()).any():
+        raise ValueError("exclusion_detail must be null exactly when eligible")
     unknown = set(labels["exclusion_reason"].dropna()) - EXCLUSION_REASONS
     if unknown:
         raise ValueError(f"unknown exclusion_reason {sorted(unknown)}")
@@ -455,22 +476,22 @@ def squared_errors(scored: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def baseline_support(squared: pd.DataFrame, model: str) -> pd.DataFrame:
+def baseline_support(squared: pd.DataFrame, model: str, target: str) -> pd.DataFrame:
     if model not in squared:
         return squared.iloc[:0]
-    columns = dict.fromkeys([model, *REQUIRED_BASELINES])
+    columns = dict.fromkeys([model, *required_baselines(target)])
     return squared[[c for c in columns if c in squared]].dropna()
 
 
 def skill_metrics(
-    support: pd.DataFrame, days: pd.Series, model: str, binary: bool
+    support: pd.DataFrame, days: pd.Series, model: str, target: str
 ) -> list[dict]:
-    baselines = [b for b in REQUIRED_BASELINES if b != model]
+    baselines = [b for b in required_baselines(target) if b != model]
     if support.empty:
         names = {f"skill_vs_{b}": "share" for b in baselines}
         return null_metrics(names, "no_predicted_rows")
     days = days.reindex(support.index)
-    stat = _brier_skill if binary else _rmse_skill
+    stat = _brier_skill if target in BINARY else _rmse_skill
     metrics = []
     for baseline in baselines:
         name = f"skill_vs_{baseline}"
@@ -587,10 +608,10 @@ def evaluate_target(frame: pd.DataFrame, basis: dict[str, list[str]]) -> list[di
             records += _rows(identity, place, model, basis, slice_name, metrics, counts)
         for model in models:
             own = cell[cell["model_version"].eq(model)]
-            support = baseline_support(squared, model)
+            support = baseline_support(squared, model, target)
             rows = own[own["prediction_id"].isin(support.index)]
             counts = _cell_counts(own, rows, binary)
-            skill = skill_metrics(support, days, model, binary)
+            skill = skill_metrics(support, days, model, target)
             records += _rows(
                 identity, place, model, basis, "baseline_support", skill, counts
             )
@@ -909,6 +930,7 @@ def main(
     if cohorts:
         requests = requests[requests["cohort_version"].isin(cohorts)]
     check_requests(predictions, requests)
+    check_same_rows(predictions)
     check_baselines(predictions)
     check_label_keys(labels_path, predictions)
     modes = (

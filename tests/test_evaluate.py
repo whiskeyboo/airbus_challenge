@@ -15,8 +15,10 @@ from airbus_challenge.baselines import (
 from airbus_challenge.evaluate import (
     CAPACITY_RATIO,
     CLIMATOLOGY,
+    CONDITIONAL_RATE,
     DAY_OFFSET,
     LOCKED_EXPERIMENTS,
+    LOGISTIC,
     MIN_CI_DAYS,
     PERSISTENCE,
     REQUEST_KEYS,
@@ -35,6 +37,7 @@ from airbus_challenge.evaluate import (
     check_label_keys,
     check_locked_candidates,
     check_requests,
+    check_same_rows,
     classification_metrics,
     evaluate_target,
     join_labels,
@@ -45,6 +48,7 @@ from airbus_challenge.evaluate import (
     mark_common,
     regression_metrics,
     reliability,
+    required_baselines,
     skill_metrics,
     squared_errors,
     worst_misses,
@@ -111,6 +115,9 @@ def labels_for(
             "y_true": pd.Series(y_true, dtype="float64"),
             "eligible": [y is not None for y in y_true],
             "exclusion_reason": [
+                None if y is not None else "cancelled" for y in y_true
+            ],
+            "exclusion_detail": [
                 None if y is not None else "cancelled" for y in y_true
             ],
             "label_version": "fixture",
@@ -266,14 +273,14 @@ def test_binary_skill_compares_brier_scores():
     table = predictions_for(
         "KATL",
         [DAY_ONE, DAY_TWO],
-        {MODEL: [0.8, 0.2], PERSISTENCE: [0.5, 0.5], CLIMATOLOGY: [0.6, 0.4]},
+        {MODEL: [0.8, 0.2], CONDITIONAL_RATE: [0.5, 0.5], LOGISTIC: [0.6, 0.4]},
         target_kind=SEVERE,
         unit=PROBABILITY,
     )
     records = records_of(table, labels_for(table, [1.0, 0.0], PROBABILITY))
     skill = value(
         records,
-        metric=f"skill_vs_{PERSISTENCE}",
+        metric=f"skill_vs_{CONDITIONAL_RATE}",
         model=MODEL,
         airport="KATL",
         horizon=3,
@@ -338,10 +345,10 @@ def test_skill_ci_keeps_rows_on_their_own_days():
     rows = scored(table, labels_for(table, [0.0] * n))
     squared = squared_errors(rows)
     days_by_id = rows.drop_duplicates("prediction_id").set_index("prediction_id")["day"]
-    support = baseline_support(squared, MODEL)
+    support = baseline_support(squared, MODEL, TARGET)
     metric = next(
         m
-        for m in skill_metrics(support, days_by_id, MODEL, False)
+        for m in skill_metrics(support, days_by_id, MODEL, TARGET)
         if m["metric"] == f"skill_vs_{PERSISTENCE}"
     )
     model_rows = rows[rows["model_version"].eq(MODEL)].sort_values("prediction_id")
@@ -403,10 +410,11 @@ def test_unavailable_rows_do_not_count_as_predicted():
     ],
 )
 def test_a_model_with_no_estimates_reports_every_metric_as_null(kind, unit, names):
+    first, second = required_baselines(kind)
     table = predictions_for(
         "KATL",
         [DAY_ONE],
-        {MODEL: [np.nan], PERSISTENCE: [0.5], CLIMATOLOGY: [0.5]},
+        {MODEL: [np.nan], first: [0.5], second: [0.5]},
         target_kind=kind,
         unit=unit,
     )
@@ -422,7 +430,7 @@ def test_a_model_with_no_estimates_reports_every_metric_as_null(kind, unit, name
         row = record(records, metric=name, **common)
         assert (row["value"], row["unit"]) == (None, expected_unit)
         assert row["reason"] == "no_predicted_rows"
-    for name, expected_unit in {f"skill_vs_{PERSISTENCE}": "share"}.items():
+    for name, expected_unit in {f"skill_vs_{first}": "share"}.items():
         row = record(records, metric=name, **skill)
         assert (row["value"], row["unit"]) == (None, expected_unit)
         assert row["reason"] == "no_predicted_rows"
@@ -795,11 +803,15 @@ def write_labels(labels: pd.DataFrame, tmp_path) -> str:
         (lambda d: d.assign(y_true=np.nan), "without an outcome"),
         (lambda d: d.assign(exclusion_reason="cancelled"), "null exactly when"),
         (
-            lambda d: d.assign(eligible=False, exclusion_reason=None),
+            lambda d: d.assign(
+                eligible=False, exclusion_reason=None, exclusion_detail="x"
+            ),
             "null exactly when",
         ),
         (
-            lambda d: d.assign(eligible=False, exclusion_reason="canceled"),
+            lambda d: d.assign(
+                eligible=False, exclusion_reason="canceled", exclusion_detail="x"
+            ),
             "unknown exclusion_reason",
         ),
     ],
@@ -1185,6 +1197,7 @@ def test_baseline_run_scores_end_to_end_on_the_fixture(hourly, tmp_path, clean_g
             "y_true": truth.reindex(keys).astype("float64").to_numpy(),
             "eligible": True,
             "exclusion_reason": None,
+            "exclusion_detail": None,
             "label_version": "fixture",
             "unit": UNIT,
             "data_mode": "fixture",
@@ -1501,3 +1514,52 @@ def test_inputs_are_hashed_before_they_are_read(tmp_path, clean_git, monkeypatch
     monkeypatch.setattr(evaluate, "load_predictions", spy_load)
     main(["run"], *inputs)
     assert events.index("hash") < events.index("load")
+
+
+# Settled contract from the integration review
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda d: d.assign(
+            exclusion_detail=None, eligible=False, exclusion_reason="cancelled"
+        ),
+        lambda d: d.assign(exclusion_detail="unexpected"),
+    ],
+    ids=["ineligible_without_detail", "eligible_with_detail"],
+)
+def test_exclusion_detail_follows_eligibility(tmp_path, change):
+    table, labels = severe_table([0.5], [1])
+    path = write_labels(change(labels), tmp_path)
+    with pytest.raises(ValueError, match="exclusion_detail must be null"):
+        load_labels(path, table["prediction_id"].unique().tolist())
+
+
+def test_exclusion_detail_values_are_not_validated(tmp_path):
+    table, labels = severe_table([0.5, 0.5], [1, None])
+    labels["exclusion_detail"] = [None, "anything_the_producer_says"]
+    path = write_labels(labels, tmp_path)
+    assert len(load_labels(path, table["prediction_id"].unique().tolist())) == 2
+
+
+def test_severe_delay_needs_its_own_baselines():
+    table = predictions_for(
+        "KATL",
+        [DAY_ONE],
+        {MODEL: [0.5], PERSISTENCE: [0.5], CLIMATOLOGY: [0.5]},
+        target_kind=SEVERE,
+        unit=PROBABILITY,
+    )
+    with pytest.raises(ValueError, match="baseline_conditional_rate_v1"):
+        check_baselines(table.assign(split="validation"))
+
+
+def test_models_and_baselines_share_one_scored_row_set():
+    table = throughput_table().assign(split="validation")
+    check_same_rows(table)
+    # A model scoring a request the baselines dropped has a different fit cutoff.
+    extra = table[table["model_version"].eq(MODEL)].head(1)
+    extra = extra.assign(prediction_id="issued-before-cutoff")
+    with pytest.raises(ValueError, match="different rows"):
+        check_same_rows(pd.concat([table, extra], ignore_index=True))
