@@ -11,3 +11,8 @@ airports:
     runway_heading_deg: 180
     timezone: America/Chicago
     iem_station: DFW
+
+# Timezones for BTS endpoint airports missing from airportsdata (docs/DECISIONS.md P11).
+# Not study airports: code that iterates `airports` must never read this section.
+timezone_overrides:
+  PBI: {icao: KPBI, timezone: America/New_York}  # Palm Beach International
