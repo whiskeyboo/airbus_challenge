@@ -32,6 +32,10 @@ This is the authoritative register for decisions that change scientific meaning 
 | P09 | Persistence uses the last complete hour before T (the hour starting at T - 1h) and is marked as a simulated feed, because BTS publishes months later. Climatology and schedule-only baselines are reported alongside | Integrator | Proposed 2026-10-31 |
 | P10 | Benign hours for the clear-weather ceiling: ceiling at least 3,000 ft or none, visibility at least 5 sm, no weather codes (`configs/experiment.yaml`) | Integrator | Proposed 2026-10-31; settle before the ceiling is fitted, on train only |
 | P11 | Airport timezones come from `airportsdata`, with an explicit override for airports it lacks (PBI so far) | Integrator | Proposed 2026-10-31; check coverage on all BTS months |
+| P13 | Simulated availability: METAR and TAF usable 10 min after observation/issue (`availability_basis = simulated`). Corrected (COR) METARs have unknown send time, so `available_at` is null and they are never used | Integrator | Accepted 2026-10-31 (`iem.py`). A 5 min latency is only a separately labelled sensitivity check |
+| P14 | `metar-select/1`: METAR windows select on `available_at` in (T-6h, T]; latest report by observed time, official preferred over MADIS on ties; latest older than 3 h makes METAR features null (`metar_stale`) | Integrator | Accepted 2026-10-31 (`features.py`) |
+| P15 | `taf-select/1`: latest bulletin with `available_at` <= T (amendments/corrections supersede). Bulletins with conflicting versions are skipped for the previous eligible one (`taf_conflict_fallback`). A target window past the bulletin end is missing (`taf_uncovered`), never filled from another bulletin. Multi-hour windows use worst case | Integrator | Accepted 2026-10-31 (`features.py`) |
+| P16 | Wind components: calm = 0; variable = crosswind at full speed, METAR head/tailwind null, TAF tailwind at full speed on both ends; missing = null. Gust components fall back to sustained speed. Headings as given (O03) | Integrator | Accepted 2026-10-31 (`features.py`) |
 
 ## Resolved from the brief (team decisions, 2026-10-31)
 
