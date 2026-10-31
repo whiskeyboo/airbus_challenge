@@ -1,4 +1,6 @@
 import json
+import shutil
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -425,12 +427,17 @@ def clean_git(monkeypatch):
     monkeypatch.setattr(baselines, "git", lambda *args: "")
 
 
+@pytest.fixture(autouse=True)
+def canonical(monkeypatch, tmp_path):
+    # Every test sees tmp canonical paths, so none can touch the real ledger.
+    monkeypatch.setattr(baselines, "HOURLY", tmp_path / "airport_hourly.parquet")
+    monkeypatch.setattr(baselines, "REQUESTS", tmp_path / "prediction_requests.parquet")
+    monkeypatch.setattr(baselines, "LEDGER", tmp_path / "locked_runs")
+    monkeypatch.setattr(baselines, "LEDGER_MIRROR", tmp_path / "mirror")
+
+
 def locked_args(tmp_path) -> dict:
-    return {
-        "locked_test": True,
-        "approved_by": "tester",
-        "ledger": tmp_path / "locked_runs",
-    }
+    return {"locked_test": True, "approved_by": "tester"}
 
 
 def write_inputs(hourly, requests, tmp_path):
@@ -482,19 +489,58 @@ def test_a_crashed_locked_run_cannot_be_retried(
     def crash(*args):
         raise RuntimeError("crash after reading 2025")
 
-    monkeypatch.setattr(baselines, "write_predictions", crash)
-    with pytest.raises(RuntimeError, match="crash"):
-        main(*inputs, tmp_path / "artifacts", **locked_args(tmp_path))
-    monkeypatch.undo()
-    monkeypatch.setattr(baselines, "git", lambda *args: "")
+    with monkeypatch.context() as patch:
+        patch.setattr(baselines, "write_predictions", crash)
+        with pytest.raises(RuntimeError, match="crash"):
+            main(*inputs, tmp_path / "artifacts", **locked_args(tmp_path))
     with pytest.raises(FileExistsError, match="runs once"):
         main(*inputs, tmp_path / "other_artifacts", **locked_args(tmp_path))
 
 
 def test_locked_claim_records_approval_and_commit(tmp_path):
-    baselines.claim_locked_run("run", "tester", "abc123", tmp_path)
-    claim = json.loads((tmp_path / "run.json").read_text())
+    baselines.claim_locked_run("run", "tester", "abc123")
+    claim = json.loads((tmp_path / "locked_runs" / "run.json").read_text())
     assert (claim["approved_by"], claim["commit"]) == ("tester", "abc123")
+
+
+def test_a_claim_lands_in_the_ledger_and_its_mirror(tmp_path, capsys):
+    baselines.claim_locked_run("run", "tester", "abc", "hash-1")
+    canonical = tmp_path / "locked_runs" / "run.json"
+    mirrored = tmp_path / "mirror" / "run.json"
+    assert canonical.read_bytes() == mirrored.read_bytes()
+    assert json.loads(mirrored.read_text())["predictions_sha256"] == "hash-1"
+    assert str(mirrored) in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("held_in", ["locked_runs", "mirror"])
+@pytest.mark.parametrize(
+    ("name", "message"), [("run", "run was claimed"), ("other", "claimed as run")]
+)
+def test_a_claim_in_either_ledger_blocks_a_new_one(tmp_path, held_in, name, message):
+    folder = tmp_path / held_in
+    folder.mkdir()
+    (folder / "run.json").write_text(json.dumps({"predictions_sha256": "hash-1"}))
+    with pytest.raises(FileExistsError, match=message):
+        baselines.claim_locked_run(name, "tester", "abc", "hash-1")
+    assert sorted(p.name for p in tmp_path.rglob("*.json")) == ["run.json"]
+
+
+@pytest.mark.parametrize("moved", ["hourly_path", "requests_path", "ledger", "mirror"])
+def test_locked_main_refuses_non_canonical_paths(hourly, tmp_path, clean_git, moved):
+    inputs, _ = real_inputs(hourly, tmp_path)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    paths = dict(zip(["hourly_path", "requests_path"], inputs, strict=True))
+    if moved in paths:
+        paths[moved] = Path(shutil.copy(paths[moved], elsewhere))
+    else:
+        paths[moved] = elsewhere / moved
+    with pytest.raises(
+        ValueError, match=f"canonical .*'{moved.removesuffix('_path')}'"
+    ):
+        main(artifacts=tmp_path / "artifacts", **paths, **locked_args(tmp_path))
+    assert not list(tmp_path.rglob("*.json"))
+    assert not (tmp_path / "artifacts").exists()
 
 
 def test_locked_main_needs_approval(hourly, tmp_path, clean_git):
