@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from airbus_challenge import calibrate
 from airbus_challenge.baselines import TARGET
 from airbus_challenge.calibrate import (
     ASSESS,
@@ -217,3 +218,14 @@ def test_validate_fallback_verdicts():
         target_start_utc=pd.Timestamp("2024-08-01", tz="UTC")
     )
     assert validate_fallback(calib, "fb", "clim")["n"] == 0  # validation rows only
+
+
+def test_an_unmet_act_share_leaves_no_act_ratio():
+    # Every act-hour came in well above 0.70 of the ceiling, at every ratio tried.
+    rows = pd.DataFrame(
+        {"p10_widened": [10.0] * 4, "p95": [100.0] * 4, "actual_ratio": [0.95] * 4}
+    )
+    out = calibrate.throughput_alerts(rows)
+    assert out["act_ratio"] is None and out["reached"] is False
+    assert out["reason"] == "act_share_target_not_reached"
+    assert out["steps"][-1]["act_ratio"] == calibrate.RATIO_FLOOR

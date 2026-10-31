@@ -204,8 +204,12 @@ def throughput_alerts(rows: pd.DataFrame) -> dict:
         ):
             break
         ratio -= RATIO_STEP
-    return {"act_ratio": round(ratio, 2), "watch_ratio": RATIO_WATCH,
-            "target_share": 0.5, "reached": share is not None and share >= 0.5, "steps": steps}  # fmt: skip
+    reached = share is not None and share >= 0.5
+    # Like a delay threshold that misses its precision target, an unmet share
+    # leaves no act ratio, so recommend never acts on it.
+    return {"act_ratio": round(ratio, 2) if reached else None, "watch_ratio": RATIO_WATCH,
+            "target_share": 0.5, "reached": reached, "steps": steps,
+            "reason": None if reached else "act_share_target_not_reached"}  # fmt: skip
 
 
 def validate_fallback(
