@@ -16,6 +16,7 @@ This is the authoritative register for decisions that change scientific meaning 
 | R08 | Train the severe-delay model on all BTS flights. The provided CSV flights, identified by `in_provided_csv`, are reported as a separate CSV-only comparison | User decision, 2026-10-31 (closes O08) |
 | R09 | Final test is 2025-01-01 to 2025-08-01, frozen before any test access. It matches the provided CSV, so the CSV-only comparison is scored on the same months. Aug-Dec 2025 may only appear as a separately labelled extra check on supplemental data | User decision, 2026-10-31 (closes O09) |
 | R10 | Keep the current `.env` Drive folder. The folder printed in the brief returns HTTP 401 to scripted access, so it cannot be fetched automatically; the CSV matches the audited profile in `docs/SOURCES.md` (148,273 rows, 123 columns, 2023-01-01 to 2025-07-31) | User decision, 2026-10-31 (closes O10) |
+| R11 | Delivery scope 2026-10-31: the repository is delivered with development results only (validation H1 2024, calibration H2 2024). The locked 2025 assessment (Phase 6) is not run in this delivery and remains available once through the shared ledger. WP-D5 (operations feed) and WP-D6 (transfer comparator) stay open, so simulated operations features and leave-one-airport-out comparisons are not part of the delivered results | Project lead decision, 2026-10-31 |
 
 ## Proposed implementation defaults
 

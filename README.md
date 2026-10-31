@@ -13,9 +13,9 @@ On macOS, LightGBM also needs the OpenMP runtime: `brew install libomp`.
 
 ## Pipeline
 
-download → clean → requests → iem → targets → features → baselines + flight_baselines → train → evaluate → failures → recommend → explain → dashboard
+download → clean → requests → iem → targets → features + demand → registry → slices → input_qa → baselines + flight_baselines → train → calibrate → evaluate → summary → failures → recommend → explain → dashboard
 
-`recommend.py` uses the WP-D7 thresholds in a run's `calibration.json` (`uv run python -m airbus_challenge.calibrate --run <run_id>`), and labelled provisional thresholds when that file is missing.
+`recommend.py` uses the WP-D7 thresholds in a run's `calibration.json` (`uv run python -m airbus_challenge.calibrate --run <run_id>`), and labelled provisional thresholds when that file is missing. `operations.py` (simulated operations features) is optional and not used by the delivered models while WP-D5 is open.
 
 Development run, in order. `iem` runs before `targets` because the P12 exclusion audit reads METARs.
 
@@ -26,9 +26,18 @@ uv run python -m airbus_challenge.requests    # prediction_requests.parquet
 uv run python -m airbus_challenge.iem         # weather_observations / weather_forecasts
 uv run python -m airbus_challenge.targets     # airport_hourly.parquet, data/labels/labels.parquet
 uv run python -m airbus_challenge.features    # feature_snapshots / feature_lineage
+uv run python -m airbus_challenge.demand      # demand_features (schedule-only)
+uv run python -m airbus_challenge.registry    # feature_registry.json (frozen model inputs)
+uv run python -m airbus_challenge.slices      # eval_weather_slices (evaluation only)
+uv run python -m airbus_challenge.input_qa    # reports/input_quality.json
 uv run python -m airbus_challenge.baselines   # artifacts/baselines_dev/
 uv run python -m airbus_challenge.flight_baselines  # artifacts/baselines_flight_dev/
-uv run python -m airbus_challenge.evaluate --runs baselines_dev baselines_flight_dev  # reports/metrics_dev.json + figures
+uv run python -m airbus_challenge.train                       # artifacts/lgbm_throughput_dev/
+uv run python -m airbus_challenge.train --task severe_delay   # artifacts/lgbm_delay_dev/
+uv run python -m airbus_challenge.calibrate --run lgbm_throughput_dev --runs baselines_dev
+uv run python -m airbus_challenge.calibrate --run lgbm_delay_dev --runs baselines_flight_dev
+uv run python -m airbus_challenge.evaluate --runs baselines_dev baselines_flight_dev lgbm_throughput_dev lgbm_delay_dev  # reports/metrics_dev.json + figures
+uv run python -m airbus_challenge.summary     # results summary from metrics_dev.json
 uv run python -m airbus_challenge.recommend --run <run_id>  # advisories.parquet for the dashboard
 ```
 
@@ -46,6 +55,20 @@ Checks: `uv run ruff check --fix` and `uv run pytest`.
 - `artifacts/<run_id>/`: `predictions.parquet` and `manifest.json` (cutoff, hashes, status and reason counts).
 - `reports/`: `metrics_dev.json` and figures from real data.
 - `reports/fixture/`: the same outputs from fixture data (gitignored), so they are never confused with real results.
+
+## Status at delivery (2026-10-31)
+
+Development results only (validation H1 2024, calibration H2 2024); see [reports/RESULTS_dev.md](reports/RESULTS_dev.md) and [docs/DECISIONS.md](docs/DECISIONS.md) R11.
+
+| Phase | Status |
+|---|---|
+| 1 Foundations | Done |
+| 2 Model-ready data | Primary cohort done. CSV-only and leave-one-airport-out cohort data not generated; ratio labels not in `labels.parquet`; operations features built but unused (WP-D5 open) |
+| 3 Baselines and dev metrics | Throughput and flight baselines and dev evaluation done; ratio and transfer baselines not done (WP-D6 open) |
+| 4 Train and calibrate | LightGBM throughput and severe-delay models trained on 2023; WP-D7 calibration done; ablations and transfer tests not done |
+| 5 Replay product | Recommendations, fact-checked briefs, dashboard, offline/replay parity test done |
+| 6 Locked 2025 test | Not run; available once via the shared ledger |
+| 7 Delivery | README, LIMITATIONS, FEATURE_PROVENANCE, PITCH, dev results |
 
 ## Locked 2025 test
 
