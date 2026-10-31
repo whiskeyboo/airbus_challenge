@@ -5,13 +5,16 @@ Test 4 (future flight statuses) is out of scope here: weather features read no f
 
 import io
 import json
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from airbus_challenge import features
+from airbus_challenge import features, iem
 
 LATENCY = pd.Timedelta(minutes=10)
 
@@ -721,7 +724,134 @@ def test_request_path_matches_airport_hour_path_and_dedupes_keys():
     assert set(lineage.snapshot_key) == set(out.snapshot_key) - {p2.snapshot_key}
 
 
-def write_fixture_dir(path, obs, fc, requests, decoy=b"not a parquet file"):
+def dense_weather():
+    """A METAR every 10 min and a TAF amendment every 30 min, each with distinct values, so any
+    shift of as_of changes the selected report or bulletin."""
+    start = ts("2023-06-01 05:00")
+    obs = obs_table(
+        *[
+            metar(
+                str(start + pd.Timedelta(minutes=10 * i)),
+                wind=float(i),
+                pressure=1000.0 + i,
+            )
+            for i in range(6 * 16)
+        ]
+    )
+    fc = fc_table(
+        *[
+            bulletin(
+                f"B{i:02d}",
+                str(start + pd.Timedelta(minutes=30 * i + 5)),
+                "2023-06-02 18:00",
+                [
+                    (
+                        "prevailing",
+                        str(start + pd.Timedelta(minutes=30 * i + 5)),
+                        "2023-06-02 18:00",
+                        0.25 + i / 10,
+                        100.0 * (i + 1),
+                        (),
+                        None,
+                    ),
+                ],
+                amendment=i > 0,
+            )
+            for i in range(32)
+        ]
+    )
+    return obs, fc
+
+
+FLIGHTS = request_rows(
+    [
+        (
+            "t1",
+            "throughput",
+            None,
+            "2023-06-01 12:00",
+            "2023-06-01 18:00",
+            "2023-06-01 19:00",
+            6,
+        ),
+        ("f3", "severe_delay", "a", "2023-06-01 14:47", "2023-06-01 17:47", None, 3),
+        ("f3b", "severe_delay", "b", "2023-06-01 13:05", "2023-06-01 16:05", None, 3),
+        ("f6", "severe_delay", "c", "2023-06-01 11:13", "2023-06-01 17:13", None, 6),
+        ("f9", "severe_delay", "d", "2023-06-01 08:31", "2023-06-01 17:31", None, 9),
+        ("f12", "severe_delay", "e", "2023-06-01 07:22", "2023-06-01 19:22", None, 12),
+        ("f6b", "severe_delay", "f", "2023-06-01 12:00", "2023-06-01 18:00", None, 6),
+    ]
+)
+FEATURE_COLS = [c for c in features.FEATURES if c != "airport_icao"] + [
+    "status",
+    "reason_codes",
+]
+
+
+def direct(obs, fc, row):
+    one = FLIGHTS[FLIGHTS.prediction_id == row.prediction_id]
+    return features.snapshot(
+        obs,
+        fc,
+        one[["airport_icao", "as_of_utc", "target_start_utc", "target_end_utc"]],
+    )
+
+
+# Off-the-hour flight request: data that becomes available in (as_of, next hour] must not reach
+# it, and its snapshot equals a direct snapshot() at its exact as_of.
+def test_flight_request_ignores_data_available_after_its_own_as_of():
+    obs, fc = dense_weather()
+    out, lineage = features.request_snapshots(obs, fc, FLIGHTS)
+    late_obs = obs_table(
+        metar("2023-06-01 14:38", wind=77.0, available="2023-06-01 14:48"),
+        metar("2023-06-01 14:55", wind=88.0, vis=0.1),
+    )
+    late_fc = fc_table(
+        bulletin(
+            "LATE",
+            "2023-06-01 14:45",
+            "2023-06-02 18:00",
+            [
+                (
+                    "prevailing",
+                    "2023-06-01 14:45",
+                    "2023-06-02 18:00",
+                    0.1,
+                    50.0,
+                    ("TS",),
+                    None,
+                )
+            ],
+            amendment=True,
+        ),
+    )
+    out2, lineage2 = features.request_snapshots(
+        pd.concat([obs, late_obs], ignore_index=True),
+        pd.concat([fc, late_fc], ignore_index=True),
+        FLIGHTS,
+    )
+    pick = lambda df, pid: df[df.prediction_id == pid].reset_index(drop=True)
+    assert parquet_bytes(pick(out2, "f3")) == parquet_bytes(pick(out, "f3"))
+    key = pick(out, "f3").snapshot_key[0]
+    lin = lambda df: df[df.snapshot_key == key].reset_index(drop=True)
+    assert parquet_bytes(lin(lineage2)) == parquet_bytes(lin(lineage))
+
+    row = FLIGHTS[FLIGHTS.prediction_id == "f3"].iloc[0]
+    expected, _ = direct(obs, fc, row)
+    pd.testing.assert_frame_equal(
+        pick(out, "f3")[FEATURE_COLS], expected[FEATURE_COLS].reset_index(drop=True)
+    )
+    f3 = pick(out, "f3").iloc[0]
+    assert (
+        f3.metar_wind_kt == 57.0
+    )  # 14:30 report (available 14:40); 14:40 is available 14:50.
+    assert f3.taf_age_min == 12 and f3.taf_visibility_min_sm == pytest.approx(
+        0.25 + 1.9
+    )
+
+
+def write_fixture_dir(path, obs, fc, requests):
+    path.mkdir(parents=True, exist_ok=True)
     obs.to_parquet(path / "weather_observations.parquet")
     fc.to_parquet(path / "weather_forecasts.parquet")
     for name in ("weather_observations", "weather_forecasts"):
@@ -729,66 +859,121 @@ def write_fixture_dir(path, obs, fc, requests, decoy=b"not a parquet file"):
             json.dumps({"sources": [{"sha256": name}]})
         )
     requests.to_parquet(path / "prediction_requests.parquet")
-    # Outcome tables: unreadable decoys, so any attempt to read them fails loudly.
-    for name in ("flights", "labels", "airport_hourly"):
-        (path / f"{name}.parquet").write_bytes(decoy)
 
 
-def test_request_build_reads_only_weather_and_requests(tmp_path, monkeypatch):
-    obs, fc = obs_table(*OBS), fc_table(ROUTINE, AMEND_1140)
-    write_fixture_dir(tmp_path, obs, fc, REQUESTS)
-    opened = []
-
-    def spy(fn):
-        def wrapper(path, *args, **kwargs):
-            opened.append(Path(path).name)
-            return fn(path, *args, **kwargs)
-
-        return wrapper
-
-    monkeypatch.setattr(pd, "read_parquet", spy(pd.read_parquet))
-    monkeypatch.setattr(features.ds, "dataset", spy(features.ds.dataset))
-    monkeypatch.setattr(features.pq, "read_table", spy(features.pq.read_table))
-    read_text = Path.read_text
-    monkeypatch.setattr(
-        Path,
-        "read_text",
-        lambda self, *a, **k: opened.append(self.name) or read_text(self, *a, **k),
-    )
+# Every written row, at every horizon, equals a direct snapshot() at that request's own as_of,
+# and no lineage record was available after it.
+def test_build_requests_rows_equal_direct_snapshots_at_each_requests_as_of(tmp_path):
+    obs, fc = dense_weather()
+    write_fixture_dir(tmp_path, obs, fc, FLIGHTS)
     summary = features.build_requests(tmp_path)
-    assert set(opened) <= {
-        "weather_observations.parquet",
-        "weather_forecasts.parquet",
-        "weather_observations.manifest.json",
-        "weather_forecasts.manifest.json",
-        "prediction_requests.parquet",
-    }
-    assert summary["unique_snapshot_keys"] == 3
     snaps = pd.read_parquet(tmp_path / "feature_snapshots.parquet")
-    assert sorted(snaps.prediction_id) == ["p1", "p2", "p3", "p4", "p5"]
-    assert snaps.metar_wind_kt.dtype == "float32"
     lineage = pd.read_parquet(tmp_path / "feature_lineage.parquet")
-    assert set(lineage.snapshot_key) < set(snaps.snapshot_key)
+    assert sorted(snaps.prediction_id) == sorted(FLIGHTS.prediction_id)
+    assert (
+        summary["unique_snapshot_keys"] == len(FLIGHTS) - 1
+    )  # t1 and f6b share a key.
+    assert snaps.metar_wind_kt.dtype == "float32"
+    for _, row in FLIGHTS.iterrows():
+        got = snaps[snaps.prediction_id == row.prediction_id].reset_index(drop=True)
+        assert got.as_of_utc[0] == row.as_of_utc
+        expected, _ = direct(obs, fc, row)
+        expected = features.compact(expected[FEATURE_COLS].reset_index(drop=True))
+        pd.testing.assert_frame_equal(got[FEATURE_COLS], expected)
+    used = lineage.merge(snaps[["snapshot_key", "as_of_utc"]], on="snapshot_key")
+    assert (used.contributing_available_at_utc <= used.as_of_utc).all()
+    assert set(used.snapshot_key) == set(snaps.snapshot_key)
 
-    # Outcome-side data changes cannot change features: rebuild with different decoys.
-    first = (tmp_path / "feature_snapshots.parquet").read_bytes()
-    for name in ("flights", "labels", "airport_hourly"):
-        (tmp_path / f"{name}.parquet").write_bytes(b"different outcomes")
-    features.build_requests(tmp_path)
-    assert (tmp_path / "feature_snapshots.parquet").read_bytes() == first
+
+def test_requests_whose_as_of_disagrees_with_horizon_are_rejected():
+    obs, fc = dense_weather()
+    bad = FLIGHTS.copy()
+    bad.loc[bad.horizon_h == 3, "as_of_utc"] += pd.Timedelta(hours=1)
+    with pytest.raises(AssertionError, match="horizon"):
+        features.request_snapshots(obs, fc, bad)
 
 
-def test_request_columns_carry_no_outcomes():
-    outcome_words = (
-        "delay",
-        "cancel",
-        "divert",
-        "actual",
-        "wheels",
-        "y_true",
-        "label",
-        "arr",
-    )
-    assert not [
-        c for c in features.REQUEST_COLUMNS if any(w in c for w in outcome_words)
-    ]
+AUDIT_SCRIPT = """
+import json, os, sys
+from pathlib import Path
+import airbus_challenge.features as F
+import pandas, pyarrow, pyarrow.dataset, pyarrow.parquet  # noqa: F401
+opened = []
+def hook(event, args):
+    if event == "open" and isinstance(args[0], (str, bytes, os.PathLike)):
+        opened.append(str(Path(os.fsdecode(args[0])).resolve()))
+sys.addaudithook(hook)
+F.build_requests()
+print(json.dumps({"module": F.__file__, "opened": opened}))
+"""
+OUTCOME_FILES = [
+    "data/processed/flights.parquet",
+    "data/processed/airport_hourly.parquet",
+    "data/processed/labels.parquet",
+    "data/labels/labels.parquet",
+    "data/raw/Flight_Data_With_Weather_Final.csv",
+]
+
+
+# Runs the real build in a fresh process (cold caches) inside a project folder where outcome
+# tables exist but cannot be opened by anyone (mode 000), so a native pyarrow read fails too.
+# A Python audit hook records every other file open; all must be on the allowlist.
+def test_request_build_opens_only_weather_requests_and_configs(tmp_path):
+    repo = Path(__file__).resolve().parents[1]
+    (tmp_path / "configs").mkdir()
+    for cfg in (repo / "configs").glob("*.yaml"):
+        (tmp_path / "configs" / cfg.name).write_text(cfg.read_text())
+    obs, fc = dense_weather()
+    write_fixture_dir(tmp_path / "data/processed", obs, fc, FLIGHTS)
+    for rel in OUTCOME_FILES:
+        decoy = tmp_path / rel
+        decoy.parent.mkdir(parents=True, exist_ok=True)
+        decoy.write_bytes(b"outcomes")
+        decoy.chmod(0)
+    cmd = [sys.executable, "-c", AUDIT_SCRIPT]
+    if shutil.which("sandbox-exec"):
+        # macOS: the kernel also denies native (pyarrow) reads of any outcome table, wherever it
+        # lives, so an absolute path to the real data folder fails too.
+        names = (
+            r"/(flights|labels|airport_hourly)[^/]*\.parquet$|Flight_Data_With_Weather"
+        )
+        cmd = [
+            "sandbox-exec",
+            "-p",
+            f'(version 1)(allow default)(deny file-read* (regex #"{names}"))',
+            *cmd,
+        ]
+    run = subprocess.run(cmd, check=False, cwd=tmp_path, capture_output=True, text=True)
+    assert run.returncode == 0, run.stderr
+    report = json.loads(run.stdout.strip().splitlines()[-1])
+    assert report["module"] == features.__file__
+    root = tmp_path.resolve()
+    allowed_inputs = {
+        root / "data/processed" / n
+        for n in (
+            "weather_observations.parquet",
+            "weather_forecasts.parquet",
+            "weather_observations.manifest.json",
+            "weather_forecasts.manifest.json",
+            "prediction_requests.parquet",
+        )
+    } | {root / "configs/airports.yaml", root / "configs/experiment.yaml"}
+    outputs = (".feature_snapshots.manifest.json.tmp",)
+    bad = []
+    for p in map(Path, report["opened"]):
+        if p.is_relative_to(root):
+            if p not in allowed_inputs and p.name not in outputs:
+                bad.append(p)
+        elif "/data/" in str(p) or any(w in p.name for w in FORBIDDEN):
+            bad.append(p)
+    assert not bad, bad
+    assert (tmp_path / "data/processed/feature_snapshots.parquet").exists()
+
+
+FORBIDDEN = ("flights", "labels", "airport_hourly", "Flight_Data_With_Weather")
+
+
+def test_feature_code_names_no_outcome_table():
+    for module in (features, iem):
+        source = Path(module.__file__).read_text()
+        assert not [w for w in FORBIDDEN if w in source], module.__name__

@@ -583,7 +583,7 @@ def taf_features(
     f["taf_cond_visibility_min_sm"] = gc["visibility_sm"].min()
     f["taf_cond_ceiling_min_ft"] = gc["ceiling_ft"].min()
     f["taf_cond_gust_max_kt"] = (
-        gc["gust_kt"].max().combine(gc["wind_kt"].max(), np.fmax)
+        gc["gust_kt"].max().combine(gc["wind_kt"].max(), np.fmax).astype("float64")
     )
     f["taf_cond_crosswind_max_kt"] = gc["gust_crosswind_kt"].max()
     f["taf_ts_prevailing"] = gp["ts"].any()
@@ -765,6 +765,10 @@ def request_snapshots(
     Lineage is returned per snapshot_key; requests map to it through their snapshot_key column.
     """
     req = req.reset_index(drop=True)
+    lead = (req["target_start_utc"] - req["as_of_utc"]) / pd.Timedelta(hours=1)
+    assert (lead == req["horizon_h"]).all(), (
+        "as_of_utc must equal target_start - horizon"
+    )
     window = req[["airport_icao", "as_of_utc", "target_start_utc"]].assign(
         window_end_utc=req["target_end_utc"].fillna(
             req["target_start_utc"] + pd.Timedelta(hours=1)
@@ -778,13 +782,19 @@ def request_snapshots(
         obs, fc, keys.rename(columns={"window_end_utc": "target_end_utc"})
     )
     feats = feats.drop(
-        columns=["airport_icao", "as_of_utc", "target_start_utc", "target_end_utc"]
-    )
+        columns=["airport_icao", "target_start_utc", "target_end_utc"]
+    ).rename(columns={"as_of_utc": "snapshot_as_of_utc"})
     out = req.merge(feats, on="snapshot_key", how="left", validate="many_to_one")
+    # Every request's snapshot, and every record behind it, is as of that request's own T.
+    assert (out["snapshot_as_of_utc"] == out["as_of_utc"]).all()
+    used = lineage[["snapshot_key", "contributing_available_at_utc"]].merge(
+        req[["snapshot_key", "as_of_utc"]], on="snapshot_key"
+    )
+    assert (used["contributing_available_at_utc"] <= used["as_of_utc"]).all()
     lineage = lineage.drop(
         columns=["airport_icao", "as_of_utc", "target_start_utc", "target_end_utc"]
     )
-    return out, lineage
+    return out.drop(columns="snapshot_as_of_utc"), lineage
 
 
 def compact(df: pd.DataFrame) -> pd.DataFrame:
@@ -841,6 +851,8 @@ def build_requests(processed: Path = iem.PROCESSED) -> dict:
                     )
                 writers[name] = pq.ParquetWriter(tmps[name], schema)
             writers[name].write_table(table.cast(writers[name].schema))
+    written = sum(counts.values())
+    assert written == requests.count_rows(), "requests outside the monthly partitions"
     for name, w in writers.items():
         w.close()
         tmps[name].replace(paths[name])
