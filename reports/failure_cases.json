@@ -1,0 +1,3952 @@
+{
+  "run_id": "failures_primary",
+  "rules_version": "failure-rules/1",
+  "scope": "locked_test",
+  "experiment": "primary",
+  "data_mode": "real",
+  "commit": "7f6c1b3a184d1695c2c2a936948f0d5ac2a26151",
+  "generated_at_utc": "2026-10-31T10:17:49Z",
+  "source_metrics": {
+    "path": "reports/metrics.json",
+    "sha256": "740bc6e2fb9a3d071812a8e9243b9bf8a199619ed41fa1f0753bd220b1dfde4e",
+    "run_id": "evaluate_primary"
+  },
+  "inputs_sha256": {
+    "artifacts/frozen_primary_v1/predictions.parquet": "e5197ada7fe17cca14232f612fe17312aefee52fa2f6da9792026f092d31878b",
+    "data/processed/feature_snapshots.parquet": "fe85021607f2709b869142b5b6d74d8a70b34d798ef655ffb8a79961b244583f",
+    "data/processed/feature_lineage.parquet": "ca862c51dd817226da3fac4a0cc29e436c00ff155138de749d38058b1d51b0af"
+  },
+  "rules": {
+    "limitations": {
+      "metar_stale": "METAR older than 3 h at issue time",
+      "metar_unavailable": "no METAR in the 6 h before issue time",
+      "taf_uncovered": "TAF did not cover the target hour",
+      "taf_unavailable": "no TAF available by issue time",
+      "source_hour_partial": "source hour partial (P12): the persistence feed count may be low",
+      "degraded_input": "unavailable/degraded input",
+      "large_error_long_horizon": "large error at long horizon",
+      "outside_interval": "outcome outside the p10-p90 interval",
+      "no_feature_snapshot": "no feature snapshot for this prediction: insufficient data"
+    },
+    "signals": {
+      "metar_ts_3h": "is True",
+      "metar_fz_3h": "is True",
+      "metar_sn_3h": "is True",
+      "taf_ts_prevailing": "is True",
+      "taf_ts_conditional": "is True",
+      "metar_ceiling_min_ft_3h": "< 1000",
+      "taf_ceiling_min_ft": "< 1000",
+      "taf_cond_ceiling_min_ft": "< 1000",
+      "metar_visibility_min_sm_3h": "< 3",
+      "taf_visibility_min_sm": "< 3",
+      "taf_cond_visibility_min_sm": "< 3",
+      "metar_crosswind_kt": ">= 20",
+      "taf_crosswind_max_kt": ">= 20",
+      "metar_gust_crosswind_kt": ">= 25",
+      "taf_gust_crosswind_max_kt": ">= 25",
+      "taf_cond_crosswind_max_kt": ">= 25"
+    },
+    "long_horizon_h": 9,
+    "large_relative_error": 0.25,
+    "large_probability_error": 0.5,
+    "wide_interval": 0.5,
+    "high_probability": 0.5,
+    "note": "provisional failure-report rules, not validated alert thresholds; feature drivers are associations, not causes"
+  },
+  "hindsight_weather": "not compared: no evaluation-only target-hour weather table exists, so 'weather changed after issue time' is never claimed",
+  "cases": [
+    {
+      "prediction_id": "7b7c8d95a0e2be8c3771589b399236504d4e96043a0f52a2fb72beaa0d7c71a6",
+      "model": "lgbm_release_reporting_carrier_touchdowns_v1_calibrated",
+      "target": "reporting_carrier_touchdowns",
+      "target_label": "arrival throughput (AAR proxy)",
+      "cohort": "retrospective_schedule_v1",
+      "split": "test",
+      "airport": "KDFW",
+      "horizon": 9,
+      "as_of_utc": "2025-01-09T16:00:00Z",
+      "target_start_utc": "2025-01-10T01:00:00Z",
+      "prediction": {
+        "estimate": 66.57396176606343,
+        "p10": 57.465710468024966,
+        "p90": 76.56452782000572,
+        "unit": "touchdowns/hour",
+        "status": "available",
+        "reason_codes": [
+          "retrospective_schedule"
+        ]
+      },
+      "outcome": {
+        "y_true": 0.0,
+        "error": 66.57396176606343,
+        "abs_error": 66.57396176606343
+      },
+      "baselines": {
+        "baseline_climatology_v1": {
+          "estimate": 62.42307692307692,
+          "status": "available",
+          "reason_codes": []
+        },
+        "baseline_persistence_v1": {
+          "estimate": 24.0,
+          "status": "available",
+          "reason_codes": [
+            "simulated_feed"
+          ]
+        },
+        "baseline_schedule_v1": {
+          "estimate": 67.96375671120141,
+          "status": "available",
+          "reason_codes": [
+            "retrospective_schedule"
+          ]
+        },
+        "baseline_seasonal_persistence_v1": {
+          "estimate": 72.0,
+          "status": "available",
+          "reason_codes": [
+            "simulated_feed"
+          ]
+        }
+      },
+      "explanation_status": "ok",
+      "known_at_issue": {
+        "snapshot_key": "fa5bb6080f9956bedf2d18a6bd57a524",
+        "feature_version": "weather-features/0.2.0",
+        "feature_status": "ok",
+        "feature_reason_codes": [],
+        "source_ages_min": {
+          "metar_age_min": 25.0,
+          "taf_age_min": 60.0
+        },
+        "taf_lead_h": 10.0,
+        "sources": [
+          {
+            "feature_group": "metar_latest",
+            "source_record_id": "e155e1896fae7411679f6ab47459a89a",
+            "source_ref": "metar/metar_KDFW_20221230_20250801.csv#line=20759",
+            "available_at_utc": "2025-01-09T15:45:00Z",
+            "age_min": 15.0
+          },
+          {
+            "feature_group": "metar_window",
+            "source_record_id": "window:00df11b065b89ff8673cca7d449b3c97",
+            "source_ref": "weather_observations: airport_icao, available_at_utc in (as_of - 6h, as_of], observed_at_utc <= as_of",
+            "available_at_utc": "2025-01-09T15:45:00Z",
+            "age_min": 15.0
+          },
+          {
+            "feature_group": "taf",
+            "source_record_id": "b7aafcdf95001668c54e8d61ceb676e8",
+            "source_ref": "202501091500-KFWD-FTUS44-TAFDFW-AAA#01",
+            "available_at_utc": "2025-01-09T15:10:00Z",
+            "age_min": 50.0
+          }
+        ],
+        "features": {
+          "target_hour_utc": {
+            "value": 1,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "target_hour_local": {
+            "value": 19,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "target_weekday_local": {
+            "value": 3,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "target_month_local": {
+            "value": 1,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "metar_age_min": {
+            "value": 25.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-09T15:45:00Z",
+            "source_age_min": 15.0
+          },
+          "metar_wind_status": {
+            "value": "directional",
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-09T15:45:00Z",
+            "source_age_min": 15.0
+          },
+          "metar_wind_kt": {
+            "value": 4.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-09T15:45:00Z",
+            "source_age_min": 15.0
+          },
+          "metar_gust_kt": {
+            "value": null,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-09T15:45:00Z",
+            "source_age_min": 15.0
+          },
+          "metar_headwind_kt_hdg": {
+            "value": 3.0641777515411377,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-09T15:45:00Z",
+            "source_age_min": 15.0
+          },
+          "metar_tailwind_kt_hdg": {
+            "value": 0.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-09T15:45:00Z",
+            "source_age_min": 15.0
+          },
+          "metar_tailwind_kt_rec": {
+            "value": 3.0641777515411377,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-09T15:45:00Z",
+            "source_age_min": 15.0
+          },
+          "metar_crosswind_kt": {
+            "value": 2.571150541305542,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-09T15:45:00Z",
+            "source_age_min": 15.0
+          },
+          "metar_headwind_kt_best": {
+            "value": 3.0641777515411377,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-09T15:45:00Z",
+            "source_age_min": 15.0
+          },
+          "metar_best_end": {
+            "value": "hdg",
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-09T15:45:00Z",
+            "source_age_min": 15.0
+          },
+          "metar_gust_crosswind_kt": {
+            "value": 2.571150541305542,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-09T15:45:00Z",
+            "source_age_min": 15.0
+          },
+          "metar_gust_tailwind_kt_hdg": {
+            "value": 0.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-09T15:45:00Z",
+            "source_age_min": 15.0
+          },
+          "metar_gust_tailwind_kt_rec": {
+            "value": 3.0641777515411377,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-09T15:45:00Z",
+            "source_age_min": 15.0
+          },
+          "metar_visibility_sm": {
+            "value": 2.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-09T15:45:00Z",
+            "source_age_min": 15.0
+          },
+          "metar_ceiling_ft": {
+            "value": 5000.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-09T15:45:00Z",
+            "source_age_min": 15.0
+          },
+          "metar_ceiling_none": {
+            "value": false,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-09T15:45:00Z",
+            "source_age_min": 15.0
+          },
+          "metar_temp_dewpoint_spread_c": {
+            "value": 1.6666666269302368,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-09T15:45:00Z",
+            "source_age_min": 15.0
+          },
+          "metar_pressure_tendency_3h_hpa": {
+            "value": 2.0318338871002197,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-09T15:45:00Z",
+            "source_age_min": 15.0
+          },
+          "metar_reports_3h": {
+            "value": 10,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-09T15:45:00Z",
+            "source_age_min": 15.0
+          },
+          "metar_wind_max_kt_3h": {
+            "value": 8.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-09T15:45:00Z",
+            "source_age_min": 15.0
+          },
+          "metar_gust_max_kt_3h": {
+            "value": null,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-09T15:45:00Z",
+            "source_age_min": 15.0
+          },
+          "metar_visibility_min_sm_1h": {
+            "value": 1.75,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-09T15:45:00Z",
+            "source_age_min": 15.0
+          },
+          "metar_visibility_min_sm_3h": {
+            "value": 1.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-09T15:45:00Z",
+            "source_age_min": 15.0
+          },
+          "metar_ceiling_min_ft_3h": {
+            "value": 3300.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-09T15:45:00Z",
+            "source_age_min": 15.0
+          },
+          "metar_precip_max_mm_1h": {
+            "value": 1.777999997138977,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-09T15:45:00Z",
+            "source_age_min": 15.0
+          },
+          "metar_precip_max_mm_6h": {
+            "value": 1.777999997138977,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-09T15:45:00Z",
+            "source_age_min": 15.0
+          },
+          "metar_ts_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-09T15:45:00Z",
+            "source_age_min": 15.0
+          },
+          "metar_fz_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-09T15:45:00Z",
+            "source_age_min": 15.0
+          },
+          "metar_sn_3h": {
+            "value": true,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-09T15:45:00Z",
+            "source_age_min": 15.0
+          },
+          "metar_fg_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-09T15:45:00Z",
+            "source_age_min": 15.0
+          },
+          "metar_ra_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-09T15:45:00Z",
+            "source_age_min": 15.0
+          },
+          "taf_age_min": {
+            "value": 60.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T15:10:00Z",
+            "source_age_min": 50.0
+          },
+          "taf_lead_h": {
+            "value": 10.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T15:10:00Z",
+            "source_age_min": 50.0
+          },
+          "taf_is_amendment": {
+            "value": true,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T15:10:00Z",
+            "source_age_min": 50.0
+          },
+          "taf_wind_status": {
+            "value": "directional",
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T15:10:00Z",
+            "source_age_min": 50.0
+          },
+          "taf_wind_max_kt": {
+            "value": 6.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T15:10:00Z",
+            "source_age_min": 50.0
+          },
+          "taf_gust_max_kt": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T15:10:00Z",
+            "source_age_min": 50.0
+          },
+          "taf_crosswind_max_kt": {
+            "value": 5.638155937194824,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T15:10:00Z",
+            "source_age_min": 50.0
+          },
+          "taf_tailwind_max_kt_hdg": {
+            "value": 0.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T15:10:00Z",
+            "source_age_min": 50.0
+          },
+          "taf_tailwind_max_kt_rec": {
+            "value": 2.0521209239959717,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T15:10:00Z",
+            "source_age_min": 50.0
+          },
+          "taf_gust_crosswind_max_kt": {
+            "value": 5.638155937194824,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T15:10:00Z",
+            "source_age_min": 50.0
+          },
+          "taf_visibility_min_sm": {
+            "value": 2.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T15:10:00Z",
+            "source_age_min": 50.0
+          },
+          "taf_ceiling_min_ft": {
+            "value": 600.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T15:10:00Z",
+            "source_age_min": 50.0
+          },
+          "taf_ceiling_none": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T15:10:00Z",
+            "source_age_min": 50.0
+          },
+          "taf_tempo": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T15:10:00Z",
+            "source_age_min": 50.0
+          },
+          "taf_prob_max": {
+            "value": 0.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T15:10:00Z",
+            "source_age_min": 50.0
+          },
+          "taf_cond_visibility_min_sm": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T15:10:00Z",
+            "source_age_min": 50.0
+          },
+          "taf_cond_ceiling_min_ft": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T15:10:00Z",
+            "source_age_min": 50.0
+          },
+          "taf_cond_gust_max_kt": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T15:10:00Z",
+            "source_age_min": 50.0
+          },
+          "taf_cond_crosswind_max_kt": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T15:10:00Z",
+            "source_age_min": 50.0
+          },
+          "taf_ts_prevailing": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T15:10:00Z",
+            "source_age_min": 50.0
+          },
+          "taf_ts_conditional": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T15:10:00Z",
+            "source_age_min": 50.0
+          }
+        }
+      },
+      "flags": [
+        "retrospective_schedule",
+        "simulated_feed"
+      ],
+      "limitations": [
+        {
+          "code": "large_error_long_horizon",
+          "text": "large error at long horizon"
+        },
+        {
+          "code": "outside_interval",
+          "text": "outcome outside the p10-p90 interval"
+        }
+      ],
+      "advisory_possible": true,
+      "advisory_reason": "signal at T: metar_sn_3h=True; taf_ceiling_min_ft=600 < 1000; metar_visibility_min_sm_3h=1 < 3; taf_visibility_min_sm=2 < 3"
+    },
+    {
+      "prediction_id": "292402ea796e98b2e556b1363c317b8d55078ad4bd3a8480e806eb943ff71165",
+      "model": "lgbm_release_reporting_carrier_touchdowns_v1_calibrated",
+      "target": "reporting_carrier_touchdowns",
+      "target_label": "arrival throughput (AAR proxy)",
+      "cohort": "retrospective_schedule_v1",
+      "split": "test",
+      "airport": "KATL",
+      "horizon": 12,
+      "as_of_utc": "2025-01-10T01:00:00Z",
+      "target_start_utc": "2025-01-10T13:00:00Z",
+      "prediction": {
+        "estimate": 76.14105969087417,
+        "p10": 68.58240111211256,
+        "p90": 82.1114218874861,
+        "unit": "touchdowns/hour",
+        "status": "available",
+        "reason_codes": [
+          "retrospective_schedule"
+        ]
+      },
+      "outcome": {
+        "y_true": 16.0,
+        "error": 60.14105969087417,
+        "abs_error": 60.14105969087417
+      },
+      "baselines": {
+        "baseline_climatology_v1": {
+          "estimate": 82.0576923076923,
+          "status": "available",
+          "reason_codes": []
+        },
+        "baseline_persistence_v1": {
+          "estimate": 55.0,
+          "status": "available",
+          "reason_codes": [
+            "simulated_feed"
+          ]
+        },
+        "baseline_schedule_v1": {
+          "estimate": 77.48584103723192,
+          "status": "available",
+          "reason_codes": [
+            "retrospective_schedule"
+          ]
+        },
+        "baseline_seasonal_persistence_v1": {
+          "estimate": 71.0,
+          "status": "available",
+          "reason_codes": [
+            "simulated_feed"
+          ]
+        }
+      },
+      "explanation_status": "ok",
+      "known_at_issue": {
+        "snapshot_key": "86b1dd52eb15fb811082b0dbfa8046f4",
+        "feature_version": "weather-features/0.2.0",
+        "feature_status": "ok",
+        "feature_reason_codes": [],
+        "source_ages_min": {
+          "metar_age_min": 68.0,
+          "taf_age_min": 92.0
+        },
+        "taf_lead_h": 13.533333778381348,
+        "sources": [
+          {
+            "feature_group": "metar_latest",
+            "source_record_id": "3b6aed3a8d7ef843425fd2bd870fc294",
+            "source_ref": "metar/metar_KATL_20221230_20250801.csv#line=20773",
+            "available_at_utc": "2025-01-10T00:02:00Z",
+            "age_min": 58.0
+          },
+          {
+            "feature_group": "metar_window",
+            "source_record_id": "window:a5d70f3bc2119f1550166c2cce02495e",
+            "source_ref": "weather_observations: airport_icao, available_at_utc in (as_of - 6h, as_of], observed_at_utc <= as_of",
+            "available_at_utc": "2025-01-10T00:02:00Z",
+            "age_min": 58.0
+          },
+          {
+            "feature_group": "taf",
+            "source_record_id": "bfb71cb84c47530aa2ba2d7e5581a51a",
+            "source_ref": "202501092328-KFFC-FTUS42-TAFATL#04",
+            "available_at_utc": "2025-01-09T23:38:00Z",
+            "age_min": 82.0
+          },
+          {
+            "feature_group": "taf",
+            "source_record_id": "ec9753dbd90e193be92572cf6e580fa8",
+            "source_ref": "202501092328-KFFC-FTUS42-TAFATL#05",
+            "available_at_utc": "2025-01-09T23:38:00Z",
+            "age_min": 82.0
+          }
+        ],
+        "features": {
+          "target_hour_utc": {
+            "value": 13,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "target_hour_local": {
+            "value": 8,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "target_weekday_local": {
+            "value": 4,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "target_month_local": {
+            "value": 1,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "metar_age_min": {
+            "value": 68.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-10T00:02:00Z",
+            "source_age_min": 58.0
+          },
+          "metar_wind_status": {
+            "value": "directional",
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-10T00:02:00Z",
+            "source_age_min": 58.0
+          },
+          "metar_wind_kt": {
+            "value": 5.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-10T00:02:00Z",
+            "source_age_min": 58.0
+          },
+          "metar_gust_kt": {
+            "value": null,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-10T00:02:00Z",
+            "source_age_min": 58.0
+          },
+          "metar_headwind_kt_hdg": {
+            "value": -2.5,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-10T00:02:00Z",
+            "source_age_min": 58.0
+          },
+          "metar_tailwind_kt_hdg": {
+            "value": 2.5,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-10T00:02:00Z",
+            "source_age_min": 58.0
+          },
+          "metar_tailwind_kt_rec": {
+            "value": 0.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-10T00:02:00Z",
+            "source_age_min": 58.0
+          },
+          "metar_crosswind_kt": {
+            "value": 4.330127239227295,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-10T00:02:00Z",
+            "source_age_min": 58.0
+          },
+          "metar_headwind_kt_best": {
+            "value": 2.5,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-10T00:02:00Z",
+            "source_age_min": 58.0
+          },
+          "metar_best_end": {
+            "value": "rec",
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-10T00:02:00Z",
+            "source_age_min": 58.0
+          },
+          "metar_gust_crosswind_kt": {
+            "value": 4.330127239227295,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-10T00:02:00Z",
+            "source_age_min": 58.0
+          },
+          "metar_gust_tailwind_kt_hdg": {
+            "value": 2.5,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-10T00:02:00Z",
+            "source_age_min": 58.0
+          },
+          "metar_gust_tailwind_kt_rec": {
+            "value": 0.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-10T00:02:00Z",
+            "source_age_min": 58.0
+          },
+          "metar_visibility_sm": {
+            "value": 10.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-10T00:02:00Z",
+            "source_age_min": 58.0
+          },
+          "metar_ceiling_ft": {
+            "value": null,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-10T00:02:00Z",
+            "source_age_min": 58.0
+          },
+          "metar_ceiling_none": {
+            "value": true,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-10T00:02:00Z",
+            "source_age_min": 58.0
+          },
+          "metar_temp_dewpoint_spread_c": {
+            "value": 14.44444465637207,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-10T00:02:00Z",
+            "source_age_min": 58.0
+          },
+          "metar_pressure_tendency_3h_hpa": {
+            "value": -0.3386389911174774,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-10T00:02:00Z",
+            "source_age_min": 58.0
+          },
+          "metar_reports_3h": {
+            "value": 3,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-10T00:02:00Z",
+            "source_age_min": 58.0
+          },
+          "metar_wind_max_kt_3h": {
+            "value": 9.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-10T00:02:00Z",
+            "source_age_min": 58.0
+          },
+          "metar_gust_max_kt_3h": {
+            "value": null,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-10T00:02:00Z",
+            "source_age_min": 58.0
+          },
+          "metar_visibility_min_sm_1h": {
+            "value": 10.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-10T00:02:00Z",
+            "source_age_min": 58.0
+          },
+          "metar_visibility_min_sm_3h": {
+            "value": 10.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-10T00:02:00Z",
+            "source_age_min": 58.0
+          },
+          "metar_ceiling_min_ft_3h": {
+            "value": null,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-10T00:02:00Z",
+            "source_age_min": 58.0
+          },
+          "metar_precip_max_mm_1h": {
+            "value": 0.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-10T00:02:00Z",
+            "source_age_min": 58.0
+          },
+          "metar_precip_max_mm_6h": {
+            "value": 0.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-10T00:02:00Z",
+            "source_age_min": 58.0
+          },
+          "metar_ts_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-10T00:02:00Z",
+            "source_age_min": 58.0
+          },
+          "metar_fz_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-10T00:02:00Z",
+            "source_age_min": 58.0
+          },
+          "metar_sn_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-10T00:02:00Z",
+            "source_age_min": 58.0
+          },
+          "metar_fg_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-10T00:02:00Z",
+            "source_age_min": 58.0
+          },
+          "metar_ra_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-10T00:02:00Z",
+            "source_age_min": 58.0
+          },
+          "taf_age_min": {
+            "value": 92.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T23:38:00Z",
+            "source_age_min": 82.0
+          },
+          "taf_lead_h": {
+            "value": 13.533333778381348,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T23:38:00Z",
+            "source_age_min": 82.0
+          },
+          "taf_is_amendment": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T23:38:00Z",
+            "source_age_min": 82.0
+          },
+          "taf_wind_status": {
+            "value": "directional",
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T23:38:00Z",
+            "source_age_min": 82.0
+          },
+          "taf_wind_max_kt": {
+            "value": 4.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T23:38:00Z",
+            "source_age_min": 82.0
+          },
+          "taf_gust_max_kt": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T23:38:00Z",
+            "source_age_min": 82.0
+          },
+          "taf_crosswind_max_kt": {
+            "value": 2.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T23:38:00Z",
+            "source_age_min": 82.0
+          },
+          "taf_tailwind_max_kt_hdg": {
+            "value": 0.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T23:38:00Z",
+            "source_age_min": 82.0
+          },
+          "taf_tailwind_max_kt_rec": {
+            "value": 3.464101552963257,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T23:38:00Z",
+            "source_age_min": 82.0
+          },
+          "taf_gust_crosswind_max_kt": {
+            "value": 2.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T23:38:00Z",
+            "source_age_min": 82.0
+          },
+          "taf_visibility_min_sm": {
+            "value": 5.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T23:38:00Z",
+            "source_age_min": 82.0
+          },
+          "taf_ceiling_min_ft": {
+            "value": 2500.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T23:38:00Z",
+            "source_age_min": 82.0
+          },
+          "taf_ceiling_none": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T23:38:00Z",
+            "source_age_min": 82.0
+          },
+          "taf_tempo": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T23:38:00Z",
+            "source_age_min": 82.0
+          },
+          "taf_prob_max": {
+            "value": 0.30000001192092896,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T23:38:00Z",
+            "source_age_min": 82.0
+          },
+          "taf_cond_visibility_min_sm": {
+            "value": 3.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T23:38:00Z",
+            "source_age_min": 82.0
+          },
+          "taf_cond_ceiling_min_ft": {
+            "value": 1500.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T23:38:00Z",
+            "source_age_min": 82.0
+          },
+          "taf_cond_gust_max_kt": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T23:38:00Z",
+            "source_age_min": 82.0
+          },
+          "taf_cond_crosswind_max_kt": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T23:38:00Z",
+            "source_age_min": 82.0
+          },
+          "taf_ts_prevailing": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T23:38:00Z",
+            "source_age_min": 82.0
+          },
+          "taf_ts_conditional": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-09T23:38:00Z",
+            "source_age_min": 82.0
+          }
+        }
+      },
+      "flags": [
+        "retrospective_schedule",
+        "simulated_feed"
+      ],
+      "limitations": [
+        {
+          "code": "large_error_long_horizon",
+          "text": "large error at long horizon"
+        },
+        {
+          "code": "outside_interval",
+          "text": "outcome outside the p10-p90 interval"
+        }
+      ],
+      "advisory_possible": false,
+      "advisory_reason": "no adverse weather feature or wide interval at T: nothing to act on"
+    },
+    {
+      "prediction_id": "3e7841ed20ee18c7129f2b8064ecb9fe7538a87e561aafd5a07e636b4d1a2ce8",
+      "model": "lgbm_release_reporting_carrier_touchdowns_v1_calibrated",
+      "target": "reporting_carrier_touchdowns",
+      "target_label": "arrival throughput (AAR proxy)",
+      "cohort": "retrospective_schedule_v1",
+      "split": "test",
+      "airport": "KDFW",
+      "horizon": 12,
+      "as_of_utc": "2025-07-12T12:00:00Z",
+      "target_start_utc": "2025-07-13T00:00:00Z",
+      "prediction": {
+        "estimate": 59.90710383293391,
+        "p10": 42.4266021194803,
+        "p90": 75.01311922011506,
+        "unit": "touchdowns/hour",
+        "status": "available",
+        "reason_codes": [
+          "retrospective_schedule"
+        ]
+      },
+      "outcome": {
+        "y_true": 0.0,
+        "error": 59.90710383293391,
+        "abs_error": 59.90710383293391
+      },
+      "baselines": {
+        "baseline_climatology_v1": {
+          "estimate": 63.77358490566038,
+          "status": "available",
+          "reason_codes": []
+        },
+        "baseline_persistence_v1": {
+          "estimate": 54.0,
+          "status": "available",
+          "reason_codes": [
+            "simulated_feed"
+          ]
+        },
+        "baseline_schedule_v1": {
+          "estimate": 65.86879049366355,
+          "status": "available",
+          "reason_codes": [
+            "retrospective_schedule"
+          ]
+        },
+        "baseline_seasonal_persistence_v1": {
+          "estimate": 86.0,
+          "status": "available",
+          "reason_codes": [
+            "simulated_feed"
+          ]
+        }
+      },
+      "explanation_status": "ok",
+      "known_at_issue": {
+        "snapshot_key": "a5065e6fc376348380533af74d0ce364",
+        "feature_version": "weather-features/0.2.0",
+        "feature_status": "ok",
+        "feature_reason_codes": [],
+        "source_ages_min": {
+          "metar_age_min": 12.0,
+          "taf_age_min": 13.0
+        },
+        "taf_lead_h": 12.216666221618652,
+        "sources": [
+          {
+            "feature_group": "metar_latest",
+            "source_record_id": "d48dffad08f9577f604e87c52f90ca69",
+            "source_ref": "metar/metar_KDFW_20221230_20250801.csv#line=25932",
+            "available_at_utc": "2025-07-12T11:58:00Z",
+            "age_min": 2.0
+          },
+          {
+            "feature_group": "metar_window",
+            "source_record_id": "window:65f25d7a2263a5348d935cc11f9352d1",
+            "source_ref": "weather_observations: airport_icao, available_at_utc in (as_of - 6h, as_of], observed_at_utc <= as_of",
+            "available_at_utc": "2025-07-12T11:58:00Z",
+            "age_min": 2.0
+          },
+          {
+            "feature_group": "taf",
+            "source_record_id": "84b1b807d2efc53b2557a8b90e03c78d",
+            "source_ref": "202507121147-KFWD-FTUS44-TAFDFW-CCA#02",
+            "available_at_utc": "2025-07-12T11:57:00Z",
+            "age_min": 3.0
+          }
+        ],
+        "features": {
+          "target_hour_utc": {
+            "value": 0,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "target_hour_local": {
+            "value": 19,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "target_weekday_local": {
+            "value": 5,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "target_month_local": {
+            "value": 7,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "metar_age_min": {
+            "value": 12.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-07-12T11:58:00Z",
+            "source_age_min": 2.0
+          },
+          "metar_wind_status": {
+            "value": "directional",
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-07-12T11:58:00Z",
+            "source_age_min": 2.0
+          },
+          "metar_wind_kt": {
+            "value": 7.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-07-12T11:58:00Z",
+            "source_age_min": 2.0
+          },
+          "metar_gust_kt": {
+            "value": null,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-07-12T11:58:00Z",
+            "source_age_min": 2.0
+          },
+          "metar_headwind_kt_hdg": {
+            "value": 6.8936543464660645,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-07-12T11:58:00Z",
+            "source_age_min": 2.0
+          },
+          "metar_tailwind_kt_hdg": {
+            "value": 0.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-07-12T11:58:00Z",
+            "source_age_min": 2.0
+          },
+          "metar_tailwind_kt_rec": {
+            "value": 6.8936543464660645,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-07-12T11:58:00Z",
+            "source_age_min": 2.0
+          },
+          "metar_crosswind_kt": {
+            "value": 1.215537190437317,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-07-12T11:58:00Z",
+            "source_age_min": 2.0
+          },
+          "metar_headwind_kt_best": {
+            "value": 6.8936543464660645,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-07-12T11:58:00Z",
+            "source_age_min": 2.0
+          },
+          "metar_best_end": {
+            "value": "hdg",
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-07-12T11:58:00Z",
+            "source_age_min": 2.0
+          },
+          "metar_gust_crosswind_kt": {
+            "value": 1.215537190437317,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-07-12T11:58:00Z",
+            "source_age_min": 2.0
+          },
+          "metar_gust_tailwind_kt_hdg": {
+            "value": 0.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-07-12T11:58:00Z",
+            "source_age_min": 2.0
+          },
+          "metar_gust_tailwind_kt_rec": {
+            "value": 6.8936543464660645,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-07-12T11:58:00Z",
+            "source_age_min": 2.0
+          },
+          "metar_visibility_sm": {
+            "value": 10.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-07-12T11:58:00Z",
+            "source_age_min": 2.0
+          },
+          "metar_ceiling_ft": {
+            "value": 2100.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-07-12T11:58:00Z",
+            "source_age_min": 2.0
+          },
+          "metar_ceiling_none": {
+            "value": false,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-07-12T11:58:00Z",
+            "source_age_min": 2.0
+          },
+          "metar_temp_dewpoint_spread_c": {
+            "value": 3.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-07-12T11:58:00Z",
+            "source_age_min": 2.0
+          },
+          "metar_pressure_tendency_3h_hpa": {
+            "value": 0.6772779822349548,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-07-12T11:58:00Z",
+            "source_age_min": 2.0
+          },
+          "metar_reports_3h": {
+            "value": 4,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-07-12T11:58:00Z",
+            "source_age_min": 2.0
+          },
+          "metar_wind_max_kt_3h": {
+            "value": 11.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-07-12T11:58:00Z",
+            "source_age_min": 2.0
+          },
+          "metar_gust_max_kt_3h": {
+            "value": null,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-07-12T11:58:00Z",
+            "source_age_min": 2.0
+          },
+          "metar_visibility_min_sm_1h": {
+            "value": 10.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-07-12T11:58:00Z",
+            "source_age_min": 2.0
+          },
+          "metar_visibility_min_sm_3h": {
+            "value": 10.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-07-12T11:58:00Z",
+            "source_age_min": 2.0
+          },
+          "metar_ceiling_min_ft_3h": {
+            "value": 2100.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-07-12T11:58:00Z",
+            "source_age_min": 2.0
+          },
+          "metar_precip_max_mm_1h": {
+            "value": 0.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-07-12T11:58:00Z",
+            "source_age_min": 2.0
+          },
+          "metar_precip_max_mm_6h": {
+            "value": 0.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-07-12T11:58:00Z",
+            "source_age_min": 2.0
+          },
+          "metar_ts_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-07-12T11:58:00Z",
+            "source_age_min": 2.0
+          },
+          "metar_fz_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-07-12T11:58:00Z",
+            "source_age_min": 2.0
+          },
+          "metar_sn_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-07-12T11:58:00Z",
+            "source_age_min": 2.0
+          },
+          "metar_fg_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-07-12T11:58:00Z",
+            "source_age_min": 2.0
+          },
+          "metar_ra_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-07-12T11:58:00Z",
+            "source_age_min": 2.0
+          },
+          "taf_age_min": {
+            "value": 13.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-07-12T11:57:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_lead_h": {
+            "value": 12.216666221618652,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-07-12T11:57:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_is_amendment": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-07-12T11:57:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_wind_status": {
+            "value": "directional",
+            "source_group": "taf",
+            "source_available_at_utc": "2025-07-12T11:57:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_wind_max_kt": {
+            "value": 13.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-07-12T11:57:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_gust_max_kt": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-07-12T11:57:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_crosswind_max_kt": {
+            "value": 2.2574262619018555,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-07-12T11:57:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_tailwind_max_kt_hdg": {
+            "value": 0.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-07-12T11:57:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_tailwind_max_kt_rec": {
+            "value": 12.80250072479248,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-07-12T11:57:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_gust_crosswind_max_kt": {
+            "value": 2.2574262619018555,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-07-12T11:57:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_visibility_min_sm": {
+            "value": 6.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-07-12T11:57:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_ceiling_min_ft": {
+            "value": 5000.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-07-12T11:57:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_ceiling_none": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-07-12T11:57:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_tempo": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-07-12T11:57:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_prob_max": {
+            "value": 0.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-07-12T11:57:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_cond_visibility_min_sm": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-07-12T11:57:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_cond_ceiling_min_ft": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-07-12T11:57:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_cond_gust_max_kt": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-07-12T11:57:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_cond_crosswind_max_kt": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-07-12T11:57:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_ts_prevailing": {
+            "value": true,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-07-12T11:57:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_ts_conditional": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-07-12T11:57:00Z",
+            "source_age_min": 3.0
+          }
+        }
+      },
+      "flags": [
+        "retrospective_schedule",
+        "simulated_feed"
+      ],
+      "limitations": [
+        {
+          "code": "large_error_long_horizon",
+          "text": "large error at long horizon"
+        },
+        {
+          "code": "outside_interval",
+          "text": "outcome outside the p10-p90 interval"
+        }
+      ],
+      "advisory_possible": true,
+      "advisory_reason": "signal at T: taf_ts_prevailing=True; interval width 0.54 x estimate >= 0.5"
+    },
+    {
+      "prediction_id": "01ac332acac00b3b42baa450838502b47c7d271bb05e4aec14521e2364d67ec9",
+      "model": "lgbm_release_cancellation_v1_calibrated",
+      "target": "cancellation",
+      "target_label": "cancellation",
+      "cohort": "retrospective_schedule_v1",
+      "split": "test",
+      "airport": "KATL",
+      "horizon": 12,
+      "as_of_utc": "2025-01-12T04:59:00Z",
+      "target_start_utc": "2025-01-12T16:59:00Z",
+      "prediction": {
+        "estimate": 0.001515847496554892,
+        "p10": null,
+        "p90": null,
+        "unit": "binary",
+        "status": "available",
+        "reason_codes": [
+          "retrospective_schedule"
+        ]
+      },
+      "outcome": {
+        "y_true": 1.0,
+        "error": -0.9984841525034451,
+        "abs_error": 0.9984841525034451
+      },
+      "baselines": {
+        "baseline_conditional_rate_v1": {
+          "estimate": 0.004657044786199813,
+          "status": "available",
+          "reason_codes": [
+            "retrospective_schedule"
+          ]
+        },
+        "baseline_logistic_v1": {
+          "estimate": 0.00847950990767035,
+          "status": "available",
+          "reason_codes": [
+            "retrospective_schedule"
+          ]
+        }
+      },
+      "explanation_status": "ok",
+      "known_at_issue": {
+        "snapshot_key": "9cdb2bafdebb7c8f6a727bb251c2fc0d",
+        "feature_version": "weather-features/0.2.0",
+        "feature_status": "ok",
+        "feature_reason_codes": [],
+        "source_ages_min": {
+          "metar_age_min": 67.0,
+          "taf_age_min": 13.0
+        },
+        "taf_lead_h": 12.216666221618652,
+        "sources": [
+          {
+            "feature_group": "metar_latest",
+            "source_record_id": "779a02e08e51be36352033889b65279d",
+            "source_ref": "metar/metar_KATL_20221230_20250801.csv#line=20860",
+            "available_at_utc": "2025-01-12T04:02:00Z",
+            "age_min": 57.0
+          },
+          {
+            "feature_group": "metar_window",
+            "source_record_id": "window:5e329129314c5e752ab0d219d042a188",
+            "source_ref": "weather_observations: airport_icao, available_at_utc in (as_of - 6h, as_of], observed_at_utc <= as_of",
+            "available_at_utc": "2025-01-12T04:02:00Z",
+            "age_min": 57.0
+          },
+          {
+            "feature_group": "taf",
+            "source_record_id": "92b7ddc45f6b0c0a52514696cfde1d20",
+            "source_ref": "202501120446-KFFC-FTUS42-TAFATL-AAC#00",
+            "available_at_utc": "2025-01-12T04:56:00Z",
+            "age_min": 3.0
+          },
+          {
+            "feature_group": "taf",
+            "source_record_id": "9efbd454dbb74d1872e5154c5e529f1f",
+            "source_ref": "202501120446-KFFC-FTUS42-TAFATL-AAC#02",
+            "available_at_utc": "2025-01-12T04:56:00Z",
+            "age_min": 3.0
+          }
+        ],
+        "features": {
+          "target_hour_utc": {
+            "value": 16,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "target_hour_local": {
+            "value": 11,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "target_weekday_local": {
+            "value": 6,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "target_month_local": {
+            "value": 1,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "metar_age_min": {
+            "value": 67.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-12T04:02:00Z",
+            "source_age_min": 57.0
+          },
+          "metar_wind_status": {
+            "value": "directional",
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-12T04:02:00Z",
+            "source_age_min": 57.0
+          },
+          "metar_wind_kt": {
+            "value": 4.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-12T04:02:00Z",
+            "source_age_min": 57.0
+          },
+          "metar_gust_kt": {
+            "value": null,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-12T04:02:00Z",
+            "source_age_min": 57.0
+          },
+          "metar_headwind_kt_hdg": {
+            "value": -3.0641777515411377,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-12T04:02:00Z",
+            "source_age_min": 57.0
+          },
+          "metar_tailwind_kt_hdg": {
+            "value": 3.0641777515411377,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-12T04:02:00Z",
+            "source_age_min": 57.0
+          },
+          "metar_tailwind_kt_rec": {
+            "value": 0.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-12T04:02:00Z",
+            "source_age_min": 57.0
+          },
+          "metar_crosswind_kt": {
+            "value": 2.571150541305542,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-12T04:02:00Z",
+            "source_age_min": 57.0
+          },
+          "metar_headwind_kt_best": {
+            "value": 3.0641777515411377,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-12T04:02:00Z",
+            "source_age_min": 57.0
+          },
+          "metar_best_end": {
+            "value": "rec",
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-12T04:02:00Z",
+            "source_age_min": 57.0
+          },
+          "metar_gust_crosswind_kt": {
+            "value": 2.571150541305542,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-12T04:02:00Z",
+            "source_age_min": 57.0
+          },
+          "metar_gust_tailwind_kt_hdg": {
+            "value": 3.0641777515411377,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-12T04:02:00Z",
+            "source_age_min": 57.0
+          },
+          "metar_gust_tailwind_kt_rec": {
+            "value": 0.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-12T04:02:00Z",
+            "source_age_min": 57.0
+          },
+          "metar_visibility_sm": {
+            "value": 10.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-12T04:02:00Z",
+            "source_age_min": 57.0
+          },
+          "metar_ceiling_ft": {
+            "value": null,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-12T04:02:00Z",
+            "source_age_min": 57.0
+          },
+          "metar_ceiling_none": {
+            "value": true,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-12T04:02:00Z",
+            "source_age_min": 57.0
+          },
+          "metar_temp_dewpoint_spread_c": {
+            "value": 2.777777671813965,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-12T04:02:00Z",
+            "source_age_min": 57.0
+          },
+          "metar_pressure_tendency_3h_hpa": {
+            "value": 0.6772779822349548,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-12T04:02:00Z",
+            "source_age_min": 57.0
+          },
+          "metar_reports_3h": {
+            "value": 3,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-12T04:02:00Z",
+            "source_age_min": 57.0
+          },
+          "metar_wind_max_kt_3h": {
+            "value": 7.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-12T04:02:00Z",
+            "source_age_min": 57.0
+          },
+          "metar_gust_max_kt_3h": {
+            "value": null,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-12T04:02:00Z",
+            "source_age_min": 57.0
+          },
+          "metar_visibility_min_sm_1h": {
+            "value": 10.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-12T04:02:00Z",
+            "source_age_min": 57.0
+          },
+          "metar_visibility_min_sm_3h": {
+            "value": 10.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-12T04:02:00Z",
+            "source_age_min": 57.0
+          },
+          "metar_ceiling_min_ft_3h": {
+            "value": null,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-12T04:02:00Z",
+            "source_age_min": 57.0
+          },
+          "metar_precip_max_mm_1h": {
+            "value": 0.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-12T04:02:00Z",
+            "source_age_min": 57.0
+          },
+          "metar_precip_max_mm_6h": {
+            "value": 0.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-12T04:02:00Z",
+            "source_age_min": 57.0
+          },
+          "metar_ts_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-12T04:02:00Z",
+            "source_age_min": 57.0
+          },
+          "metar_fz_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-12T04:02:00Z",
+            "source_age_min": 57.0
+          },
+          "metar_sn_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-12T04:02:00Z",
+            "source_age_min": 57.0
+          },
+          "metar_fg_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-12T04:02:00Z",
+            "source_age_min": 57.0
+          },
+          "metar_ra_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-12T04:02:00Z",
+            "source_age_min": 57.0
+          },
+          "taf_age_min": {
+            "value": 13.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-12T04:56:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_lead_h": {
+            "value": 12.216666221618652,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-12T04:56:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_is_amendment": {
+            "value": true,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-12T04:56:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_wind_status": {
+            "value": "directional",
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-12T04:56:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_wind_max_kt": {
+            "value": 4.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-12T04:56:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_gust_max_kt": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-12T04:56:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_crosswind_max_kt": {
+            "value": 1.9283628463745117,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-12T04:56:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_tailwind_max_kt_hdg": {
+            "value": 3.75877046585083,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-12T04:56:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_tailwind_max_kt_rec": {
+            "value": 0.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-12T04:56:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_gust_crosswind_max_kt": {
+            "value": 1.9283628463745117,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-12T04:56:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_visibility_min_sm": {
+            "value": 6.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-12T04:56:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_ceiling_min_ft": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-12T04:56:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_ceiling_none": {
+            "value": true,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-12T04:56:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_tempo": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-12T04:56:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_prob_max": {
+            "value": 0.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-12T04:56:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_cond_visibility_min_sm": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-12T04:56:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_cond_ceiling_min_ft": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-12T04:56:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_cond_gust_max_kt": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-12T04:56:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_cond_crosswind_max_kt": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-12T04:56:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_ts_prevailing": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-12T04:56:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_ts_conditional": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-12T04:56:00Z",
+            "source_age_min": 3.0
+          }
+        }
+      },
+      "flags": [
+        "retrospective_schedule"
+      ],
+      "limitations": [
+        {
+          "code": "large_error_long_horizon",
+          "text": "large error at long horizon"
+        }
+      ],
+      "advisory_possible": false,
+      "advisory_reason": "no adverse weather feature or wide interval at T: nothing to act on"
+    },
+    {
+      "prediction_id": "0c74423e987adaaa1c994f7f7a35d275c484f028d11f8a257abe70f80c5146f9",
+      "model": "lgbm_release_cancellation_v1_calibrated",
+      "target": "cancellation",
+      "target_label": "cancellation",
+      "cohort": "retrospective_schedule_v1",
+      "split": "test",
+      "airport": "KATL",
+      "horizon": 3,
+      "as_of_utc": "2025-01-24T12:19:00Z",
+      "target_start_utc": "2025-01-24T15:19:00Z",
+      "prediction": {
+        "estimate": 0.001515847496554892,
+        "p10": null,
+        "p90": null,
+        "unit": "binary",
+        "status": "available",
+        "reason_codes": [
+          "retrospective_schedule"
+        ]
+      },
+      "outcome": {
+        "y_true": 1.0,
+        "error": -0.9984841525034451,
+        "abs_error": 0.9984841525034451
+      },
+      "baselines": {
+        "baseline_conditional_rate_v1": {
+          "estimate": 0.005479148370058072,
+          "status": "available",
+          "reason_codes": [
+            "retrospective_schedule"
+          ]
+        },
+        "baseline_logistic_v1": {
+          "estimate": 0.007525119762053396,
+          "status": "available",
+          "reason_codes": [
+            "retrospective_schedule"
+          ]
+        }
+      },
+      "explanation_status": "ok",
+      "known_at_issue": {
+        "snapshot_key": "14ee22f25960bb77a5218a82ee5cb95b",
+        "feature_version": "weather-features/0.2.0",
+        "feature_status": "ok",
+        "feature_reason_codes": [],
+        "source_ages_min": {
+          "metar_age_min": 27.0,
+          "taf_age_min": 48.0
+        },
+        "taf_lead_h": 3.799999952316284,
+        "sources": [
+          {
+            "feature_group": "metar_latest",
+            "source_record_id": "cc00c4e0d15b7b756772ad3d9038e4cf",
+            "source_ref": "metar/metar_KATL_20221230_20250801.csv#line=21182",
+            "available_at_utc": "2025-01-24T12:02:00Z",
+            "age_min": 17.0
+          },
+          {
+            "feature_group": "metar_window",
+            "source_record_id": "window:081b8ca65c2f2b3c08562e2df5643851",
+            "source_ref": "weather_observations: airport_icao, available_at_utc in (as_of - 6h, as_of], observed_at_utc <= as_of",
+            "available_at_utc": "2025-01-24T12:02:00Z",
+            "age_min": 17.0
+          },
+          {
+            "feature_group": "taf",
+            "source_record_id": "69f03c186f049b4aef6285fa7df2af5f",
+            "source_ref": "202501241131-KFFC-FTUS42-TAFATL#00",
+            "available_at_utc": "2025-01-24T11:41:00Z",
+            "age_min": 38.0
+          }
+        ],
+        "features": {
+          "target_hour_utc": {
+            "value": 15,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "target_hour_local": {
+            "value": 10,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "target_weekday_local": {
+            "value": 4,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "target_month_local": {
+            "value": 1,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "metar_age_min": {
+            "value": 27.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-24T12:02:00Z",
+            "source_age_min": 17.0
+          },
+          "metar_wind_status": {
+            "value": "directional",
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-24T12:02:00Z",
+            "source_age_min": 17.0
+          },
+          "metar_wind_kt": {
+            "value": 5.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-24T12:02:00Z",
+            "source_age_min": 17.0
+          },
+          "metar_gust_kt": {
+            "value": null,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-24T12:02:00Z",
+            "source_age_min": 17.0
+          },
+          "metar_headwind_kt_hdg": {
+            "value": -4.330127239227295,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-24T12:02:00Z",
+            "source_age_min": 17.0
+          },
+          "metar_tailwind_kt_hdg": {
+            "value": 4.330127239227295,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-24T12:02:00Z",
+            "source_age_min": 17.0
+          },
+          "metar_tailwind_kt_rec": {
+            "value": 0.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-24T12:02:00Z",
+            "source_age_min": 17.0
+          },
+          "metar_crosswind_kt": {
+            "value": 2.5,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-24T12:02:00Z",
+            "source_age_min": 17.0
+          },
+          "metar_headwind_kt_best": {
+            "value": 4.330127239227295,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-24T12:02:00Z",
+            "source_age_min": 17.0
+          },
+          "metar_best_end": {
+            "value": "rec",
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-24T12:02:00Z",
+            "source_age_min": 17.0
+          },
+          "metar_gust_crosswind_kt": {
+            "value": 2.5,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-24T12:02:00Z",
+            "source_age_min": 17.0
+          },
+          "metar_gust_tailwind_kt_hdg": {
+            "value": 4.330127239227295,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-24T12:02:00Z",
+            "source_age_min": 17.0
+          },
+          "metar_gust_tailwind_kt_rec": {
+            "value": 0.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-24T12:02:00Z",
+            "source_age_min": 17.0
+          },
+          "metar_visibility_sm": {
+            "value": 10.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-24T12:02:00Z",
+            "source_age_min": 17.0
+          },
+          "metar_ceiling_ft": {
+            "value": null,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-24T12:02:00Z",
+            "source_age_min": 17.0
+          },
+          "metar_ceiling_none": {
+            "value": true,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-24T12:02:00Z",
+            "source_age_min": 17.0
+          },
+          "metar_temp_dewpoint_spread_c": {
+            "value": 3.8888888359069824,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-01-24T12:02:00Z",
+            "source_age_min": 17.0
+          },
+          "metar_pressure_tendency_3h_hpa": {
+            "value": 0.3386389911174774,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-24T12:02:00Z",
+            "source_age_min": 17.0
+          },
+          "metar_reports_3h": {
+            "value": 3,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-24T12:02:00Z",
+            "source_age_min": 17.0
+          },
+          "metar_wind_max_kt_3h": {
+            "value": 5.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-24T12:02:00Z",
+            "source_age_min": 17.0
+          },
+          "metar_gust_max_kt_3h": {
+            "value": null,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-24T12:02:00Z",
+            "source_age_min": 17.0
+          },
+          "metar_visibility_min_sm_1h": {
+            "value": 10.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-24T12:02:00Z",
+            "source_age_min": 17.0
+          },
+          "metar_visibility_min_sm_3h": {
+            "value": 10.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-24T12:02:00Z",
+            "source_age_min": 17.0
+          },
+          "metar_ceiling_min_ft_3h": {
+            "value": null,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-24T12:02:00Z",
+            "source_age_min": 17.0
+          },
+          "metar_precip_max_mm_1h": {
+            "value": 0.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-24T12:02:00Z",
+            "source_age_min": 17.0
+          },
+          "metar_precip_max_mm_6h": {
+            "value": 0.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-24T12:02:00Z",
+            "source_age_min": 17.0
+          },
+          "metar_ts_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-24T12:02:00Z",
+            "source_age_min": 17.0
+          },
+          "metar_fz_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-24T12:02:00Z",
+            "source_age_min": 17.0
+          },
+          "metar_sn_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-24T12:02:00Z",
+            "source_age_min": 17.0
+          },
+          "metar_fg_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-24T12:02:00Z",
+            "source_age_min": 17.0
+          },
+          "metar_ra_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-01-24T12:02:00Z",
+            "source_age_min": 17.0
+          },
+          "taf_age_min": {
+            "value": 48.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-24T11:41:00Z",
+            "source_age_min": 38.0
+          },
+          "taf_lead_h": {
+            "value": 3.799999952316284,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-24T11:41:00Z",
+            "source_age_min": 38.0
+          },
+          "taf_is_amendment": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-24T11:41:00Z",
+            "source_age_min": 38.0
+          },
+          "taf_wind_status": {
+            "value": "directional",
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-24T11:41:00Z",
+            "source_age_min": 38.0
+          },
+          "taf_wind_max_kt": {
+            "value": 4.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-24T11:41:00Z",
+            "source_age_min": 38.0
+          },
+          "taf_gust_max_kt": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-24T11:41:00Z",
+            "source_age_min": 38.0
+          },
+          "taf_crosswind_max_kt": {
+            "value": 2.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-24T11:41:00Z",
+            "source_age_min": 38.0
+          },
+          "taf_tailwind_max_kt_hdg": {
+            "value": 3.464101552963257,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-24T11:41:00Z",
+            "source_age_min": 38.0
+          },
+          "taf_tailwind_max_kt_rec": {
+            "value": 0.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-24T11:41:00Z",
+            "source_age_min": 38.0
+          },
+          "taf_gust_crosswind_max_kt": {
+            "value": 2.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-24T11:41:00Z",
+            "source_age_min": 38.0
+          },
+          "taf_visibility_min_sm": {
+            "value": 6.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-24T11:41:00Z",
+            "source_age_min": 38.0
+          },
+          "taf_ceiling_min_ft": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-24T11:41:00Z",
+            "source_age_min": 38.0
+          },
+          "taf_ceiling_none": {
+            "value": true,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-24T11:41:00Z",
+            "source_age_min": 38.0
+          },
+          "taf_tempo": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-24T11:41:00Z",
+            "source_age_min": 38.0
+          },
+          "taf_prob_max": {
+            "value": 0.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-24T11:41:00Z",
+            "source_age_min": 38.0
+          },
+          "taf_cond_visibility_min_sm": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-24T11:41:00Z",
+            "source_age_min": 38.0
+          },
+          "taf_cond_ceiling_min_ft": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-24T11:41:00Z",
+            "source_age_min": 38.0
+          },
+          "taf_cond_gust_max_kt": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-24T11:41:00Z",
+            "source_age_min": 38.0
+          },
+          "taf_cond_crosswind_max_kt": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-24T11:41:00Z",
+            "source_age_min": 38.0
+          },
+          "taf_ts_prevailing": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-24T11:41:00Z",
+            "source_age_min": 38.0
+          },
+          "taf_ts_conditional": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-01-24T11:41:00Z",
+            "source_age_min": 38.0
+          }
+        }
+      },
+      "flags": [
+        "retrospective_schedule"
+      ],
+      "limitations": [],
+      "advisory_possible": false,
+      "advisory_reason": "no adverse weather feature or wide interval at T: nothing to act on"
+    },
+    {
+      "prediction_id": "ffe1a8364dd743564c4215a6a8347980581630681e454a804168e9b00c9da02f",
+      "model": "lgbm_release_cancellation_v1_calibrated",
+      "target": "cancellation",
+      "target_label": "cancellation",
+      "cohort": "retrospective_schedule_v1",
+      "split": "test",
+      "airport": "KATL",
+      "horizon": 12,
+      "as_of_utc": "2025-02-18T09:29:00Z",
+      "target_start_utc": "2025-02-18T21:29:00Z",
+      "prediction": {
+        "estimate": 0.001515847496554892,
+        "p10": null,
+        "p90": null,
+        "unit": "binary",
+        "status": "available",
+        "reason_codes": [
+          "retrospective_schedule"
+        ]
+      },
+      "outcome": {
+        "y_true": 1.0,
+        "error": -0.9984841525034451,
+        "abs_error": 0.9984841525034451
+      },
+      "baselines": {
+        "baseline_conditional_rate_v1": {
+          "estimate": 0.008198541879892387,
+          "status": "available",
+          "reason_codes": [
+            "retrospective_schedule"
+          ]
+        },
+        "baseline_logistic_v1": {
+          "estimate": 0.015384383826336629,
+          "status": "available",
+          "reason_codes": [
+            "retrospective_schedule"
+          ]
+        }
+      },
+      "explanation_status": "ok",
+      "known_at_issue": {
+        "snapshot_key": "60ff9ede7c5d266ac01965e7ce3d09b1",
+        "feature_version": "weather-features/0.2.0",
+        "feature_status": "ok",
+        "feature_reason_codes": [],
+        "source_ages_min": {
+          "metar_age_min": 37.0,
+          "taf_age_min": 119.0
+        },
+        "taf_lead_h": 13.983333587646484,
+        "sources": [
+          {
+            "feature_group": "metar_latest",
+            "source_record_id": "aa91312135b59c54266ad6521f5d2c98",
+            "source_ref": "metar/metar_KATL_20221230_20250801.csv#line=21931",
+            "available_at_utc": "2025-02-18T09:02:00Z",
+            "age_min": 27.0
+          },
+          {
+            "feature_group": "metar_window",
+            "source_record_id": "window:dbdfc09d34e9019bb2ad6f8fc885ff26",
+            "source_ref": "weather_observations: airport_icao, available_at_utc in (as_of - 6h, as_of], observed_at_utc <= as_of",
+            "available_at_utc": "2025-02-18T09:02:00Z",
+            "age_min": 27.0
+          },
+          {
+            "feature_group": "taf",
+            "source_record_id": "18f3245319f6187c0ff781506aa8e686",
+            "source_ref": "202502180730-KFFC-FTUS42-TAFATL-AAA#01",
+            "available_at_utc": "2025-02-18T07:40:00Z",
+            "age_min": 109.0
+          }
+        ],
+        "features": {
+          "target_hour_utc": {
+            "value": 21,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "target_hour_local": {
+            "value": 16,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "target_weekday_local": {
+            "value": 1,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "target_month_local": {
+            "value": 2,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "metar_age_min": {
+            "value": 37.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-18T09:02:00Z",
+            "source_age_min": 27.0
+          },
+          "metar_wind_status": {
+            "value": "directional",
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-18T09:02:00Z",
+            "source_age_min": 27.0
+          },
+          "metar_wind_kt": {
+            "value": 3.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-18T09:02:00Z",
+            "source_age_min": 27.0
+          },
+          "metar_gust_kt": {
+            "value": null,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-18T09:02:00Z",
+            "source_age_min": 27.0
+          },
+          "metar_headwind_kt_hdg": {
+            "value": -1.9283628463745117,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-18T09:02:00Z",
+            "source_age_min": 27.0
+          },
+          "metar_tailwind_kt_hdg": {
+            "value": 1.9283628463745117,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-18T09:02:00Z",
+            "source_age_min": 27.0
+          },
+          "metar_tailwind_kt_rec": {
+            "value": 0.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-18T09:02:00Z",
+            "source_age_min": 27.0
+          },
+          "metar_crosswind_kt": {
+            "value": 2.298133373260498,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-18T09:02:00Z",
+            "source_age_min": 27.0
+          },
+          "metar_headwind_kt_best": {
+            "value": 1.9283628463745117,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-18T09:02:00Z",
+            "source_age_min": 27.0
+          },
+          "metar_best_end": {
+            "value": "rec",
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-18T09:02:00Z",
+            "source_age_min": 27.0
+          },
+          "metar_gust_crosswind_kt": {
+            "value": 2.298133373260498,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-18T09:02:00Z",
+            "source_age_min": 27.0
+          },
+          "metar_gust_tailwind_kt_hdg": {
+            "value": 1.9283628463745117,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-18T09:02:00Z",
+            "source_age_min": 27.0
+          },
+          "metar_gust_tailwind_kt_rec": {
+            "value": 0.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-18T09:02:00Z",
+            "source_age_min": 27.0
+          },
+          "metar_visibility_sm": {
+            "value": 10.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-18T09:02:00Z",
+            "source_age_min": 27.0
+          },
+          "metar_ceiling_ft": {
+            "value": 25000.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-18T09:02:00Z",
+            "source_age_min": 27.0
+          },
+          "metar_ceiling_none": {
+            "value": false,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-18T09:02:00Z",
+            "source_age_min": 27.0
+          },
+          "metar_temp_dewpoint_spread_c": {
+            "value": 6.666666507720947,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-18T09:02:00Z",
+            "source_age_min": 27.0
+          },
+          "metar_pressure_tendency_3h_hpa": {
+            "value": -0.6772779822349548,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-02-18T09:02:00Z",
+            "source_age_min": 27.0
+          },
+          "metar_reports_3h": {
+            "value": 3,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-02-18T09:02:00Z",
+            "source_age_min": 27.0
+          },
+          "metar_wind_max_kt_3h": {
+            "value": 5.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-02-18T09:02:00Z",
+            "source_age_min": 27.0
+          },
+          "metar_gust_max_kt_3h": {
+            "value": null,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-02-18T09:02:00Z",
+            "source_age_min": 27.0
+          },
+          "metar_visibility_min_sm_1h": {
+            "value": 10.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-02-18T09:02:00Z",
+            "source_age_min": 27.0
+          },
+          "metar_visibility_min_sm_3h": {
+            "value": 10.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-02-18T09:02:00Z",
+            "source_age_min": 27.0
+          },
+          "metar_ceiling_min_ft_3h": {
+            "value": 25000.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-02-18T09:02:00Z",
+            "source_age_min": 27.0
+          },
+          "metar_precip_max_mm_1h": {
+            "value": 0.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-02-18T09:02:00Z",
+            "source_age_min": 27.0
+          },
+          "metar_precip_max_mm_6h": {
+            "value": 0.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-02-18T09:02:00Z",
+            "source_age_min": 27.0
+          },
+          "metar_ts_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-02-18T09:02:00Z",
+            "source_age_min": 27.0
+          },
+          "metar_fz_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-02-18T09:02:00Z",
+            "source_age_min": 27.0
+          },
+          "metar_sn_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-02-18T09:02:00Z",
+            "source_age_min": 27.0
+          },
+          "metar_fg_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-02-18T09:02:00Z",
+            "source_age_min": 27.0
+          },
+          "metar_ra_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-02-18T09:02:00Z",
+            "source_age_min": 27.0
+          },
+          "taf_age_min": {
+            "value": 119.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-18T07:40:00Z",
+            "source_age_min": 109.0
+          },
+          "taf_lead_h": {
+            "value": 13.983333587646484,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-18T07:40:00Z",
+            "source_age_min": 109.0
+          },
+          "taf_is_amendment": {
+            "value": true,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-18T07:40:00Z",
+            "source_age_min": 109.0
+          },
+          "taf_wind_status": {
+            "value": "variable",
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-18T07:40:00Z",
+            "source_age_min": 109.0
+          },
+          "taf_wind_max_kt": {
+            "value": 3.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-18T07:40:00Z",
+            "source_age_min": 109.0
+          },
+          "taf_gust_max_kt": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-18T07:40:00Z",
+            "source_age_min": 109.0
+          },
+          "taf_crosswind_max_kt": {
+            "value": 3.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-18T07:40:00Z",
+            "source_age_min": 109.0
+          },
+          "taf_tailwind_max_kt_hdg": {
+            "value": 3.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-18T07:40:00Z",
+            "source_age_min": 109.0
+          },
+          "taf_tailwind_max_kt_rec": {
+            "value": 3.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-18T07:40:00Z",
+            "source_age_min": 109.0
+          },
+          "taf_gust_crosswind_max_kt": {
+            "value": 3.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-18T07:40:00Z",
+            "source_age_min": 109.0
+          },
+          "taf_visibility_min_sm": {
+            "value": 6.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-18T07:40:00Z",
+            "source_age_min": 109.0
+          },
+          "taf_ceiling_min_ft": {
+            "value": 20000.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-18T07:40:00Z",
+            "source_age_min": 109.0
+          },
+          "taf_ceiling_none": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-18T07:40:00Z",
+            "source_age_min": 109.0
+          },
+          "taf_tempo": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-18T07:40:00Z",
+            "source_age_min": 109.0
+          },
+          "taf_prob_max": {
+            "value": 0.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-18T07:40:00Z",
+            "source_age_min": 109.0
+          },
+          "taf_cond_visibility_min_sm": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-18T07:40:00Z",
+            "source_age_min": 109.0
+          },
+          "taf_cond_ceiling_min_ft": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-18T07:40:00Z",
+            "source_age_min": 109.0
+          },
+          "taf_cond_gust_max_kt": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-18T07:40:00Z",
+            "source_age_min": 109.0
+          },
+          "taf_cond_crosswind_max_kt": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-18T07:40:00Z",
+            "source_age_min": 109.0
+          },
+          "taf_ts_prevailing": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-18T07:40:00Z",
+            "source_age_min": 109.0
+          },
+          "taf_ts_conditional": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-18T07:40:00Z",
+            "source_age_min": 109.0
+          }
+        }
+      },
+      "flags": [
+        "retrospective_schedule"
+      ],
+      "limitations": [
+        {
+          "code": "large_error_long_horizon",
+          "text": "large error at long horizon"
+        }
+      ],
+      "advisory_possible": false,
+      "advisory_reason": "no adverse weather feature or wide interval at T: nothing to act on"
+    },
+    {
+      "prediction_id": "146097b052fa69e9e387134cc42c63d8d1e5008bdac507e3e60e8362e5563a68",
+      "model": "lgbm_release_departure_delay_gt45_v1_calibrated",
+      "target": "departure_delay_gt45",
+      "target_label": "severe departure delay (>45 min, operated flights)",
+      "cohort": "retrospective_schedule_v1",
+      "split": "test",
+      "airport": "KATL",
+      "horizon": 6,
+      "as_of_utc": "2025-02-03T08:05:00Z",
+      "target_start_utc": "2025-02-03T14:05:00Z",
+      "prediction": {
+        "estimate": 0.023521932612841703,
+        "p10": null,
+        "p90": null,
+        "unit": "binary",
+        "status": "available",
+        "reason_codes": [
+          "retrospective_schedule"
+        ]
+      },
+      "outcome": {
+        "y_true": 1.0,
+        "error": -0.9764780673871583,
+        "abs_error": 0.9764780673871583
+      },
+      "baselines": {
+        "baseline_conditional_rate_v1": {
+          "estimate": 0.04940891096937801,
+          "status": "available",
+          "reason_codes": [
+            "retrospective_schedule"
+          ]
+        },
+        "baseline_logistic_v1": {
+          "estimate": 0.03681963903946585,
+          "status": "available",
+          "reason_codes": [
+            "retrospective_schedule"
+          ]
+        }
+      },
+      "explanation_status": "ok",
+      "known_at_issue": {
+        "snapshot_key": "05be101157f13b39e0a77e3a9172ccd7",
+        "feature_version": "weather-features/0.2.0",
+        "feature_status": "ok",
+        "feature_reason_codes": [],
+        "source_ages_min": {
+          "metar_age_min": 13.0,
+          "taf_age_min": 143.0
+        },
+        "taf_lead_h": 8.383333206176758,
+        "sources": [
+          {
+            "feature_group": "metar_latest",
+            "source_record_id": "ca02d0a13790c2fc3985244b92476247",
+            "source_ref": "metar/metar_KATL_20221230_20250801.csv#line=21453",
+            "available_at_utc": "2025-02-03T08:02:00Z",
+            "age_min": 3.0
+          },
+          {
+            "feature_group": "metar_window",
+            "source_record_id": "window:2379103567a54bcb50e9b1473b9ffe10",
+            "source_ref": "weather_observations: airport_icao, available_at_utc in (as_of - 6h, as_of], observed_at_utc <= as_of",
+            "available_at_utc": "2025-02-03T08:02:00Z",
+            "age_min": 3.0
+          },
+          {
+            "feature_group": "taf",
+            "source_record_id": "a2d71d194d763640aafd87bc3abde899",
+            "source_ref": "202502030542-KFFC-FTUS42-TAFATL#01",
+            "available_at_utc": "2025-02-03T05:52:00Z",
+            "age_min": 133.0
+          }
+        ],
+        "features": {
+          "target_hour_utc": {
+            "value": 14,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "target_hour_local": {
+            "value": 9,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "target_weekday_local": {
+            "value": 0,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "target_month_local": {
+            "value": 2,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "metar_age_min": {
+            "value": 13.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-03T08:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_wind_status": {
+            "value": "directional",
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-03T08:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_wind_kt": {
+            "value": 4.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-03T08:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_gust_kt": {
+            "value": null,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-03T08:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_headwind_kt_hdg": {
+            "value": 4.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-03T08:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_tailwind_kt_hdg": {
+            "value": 0.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-03T08:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_tailwind_kt_rec": {
+            "value": 4.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-03T08:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_crosswind_kt": {
+            "value": 0.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-03T08:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_headwind_kt_best": {
+            "value": 4.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-03T08:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_best_end": {
+            "value": "hdg",
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-03T08:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_gust_crosswind_kt": {
+            "value": 0.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-03T08:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_gust_tailwind_kt_hdg": {
+            "value": 0.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-03T08:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_gust_tailwind_kt_rec": {
+            "value": 4.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-03T08:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_visibility_sm": {
+            "value": 10.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-03T08:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_ceiling_ft": {
+            "value": null,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-03T08:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_ceiling_none": {
+            "value": true,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-03T08:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_temp_dewpoint_spread_c": {
+            "value": 5.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-02-03T08:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_pressure_tendency_3h_hpa": {
+            "value": -0.3386389911174774,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-02-03T08:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_reports_3h": {
+            "value": 3,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-02-03T08:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_wind_max_kt_3h": {
+            "value": 4.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-02-03T08:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_gust_max_kt_3h": {
+            "value": null,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-02-03T08:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_visibility_min_sm_1h": {
+            "value": 10.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-02-03T08:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_visibility_min_sm_3h": {
+            "value": 10.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-02-03T08:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_ceiling_min_ft_3h": {
+            "value": null,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-02-03T08:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_precip_max_mm_1h": {
+            "value": 0.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-02-03T08:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_precip_max_mm_6h": {
+            "value": 0.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-02-03T08:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_ts_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-02-03T08:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_fz_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-02-03T08:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_sn_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-02-03T08:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_fg_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-02-03T08:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_ra_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-02-03T08:02:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_age_min": {
+            "value": 143.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-03T05:52:00Z",
+            "source_age_min": 133.0
+          },
+          "taf_lead_h": {
+            "value": 8.383333206176758,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-03T05:52:00Z",
+            "source_age_min": 133.0
+          },
+          "taf_is_amendment": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-03T05:52:00Z",
+            "source_age_min": 133.0
+          },
+          "taf_wind_status": {
+            "value": "variable",
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-03T05:52:00Z",
+            "source_age_min": 133.0
+          },
+          "taf_wind_max_kt": {
+            "value": 3.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-03T05:52:00Z",
+            "source_age_min": 133.0
+          },
+          "taf_gust_max_kt": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-03T05:52:00Z",
+            "source_age_min": 133.0
+          },
+          "taf_crosswind_max_kt": {
+            "value": 3.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-03T05:52:00Z",
+            "source_age_min": 133.0
+          },
+          "taf_tailwind_max_kt_hdg": {
+            "value": 3.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-03T05:52:00Z",
+            "source_age_min": 133.0
+          },
+          "taf_tailwind_max_kt_rec": {
+            "value": 3.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-03T05:52:00Z",
+            "source_age_min": 133.0
+          },
+          "taf_gust_crosswind_max_kt": {
+            "value": 3.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-03T05:52:00Z",
+            "source_age_min": 133.0
+          },
+          "taf_visibility_min_sm": {
+            "value": 6.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-03T05:52:00Z",
+            "source_age_min": 133.0
+          },
+          "taf_ceiling_min_ft": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-03T05:52:00Z",
+            "source_age_min": 133.0
+          },
+          "taf_ceiling_none": {
+            "value": true,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-03T05:52:00Z",
+            "source_age_min": 133.0
+          },
+          "taf_tempo": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-03T05:52:00Z",
+            "source_age_min": 133.0
+          },
+          "taf_prob_max": {
+            "value": 0.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-03T05:52:00Z",
+            "source_age_min": 133.0
+          },
+          "taf_cond_visibility_min_sm": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-03T05:52:00Z",
+            "source_age_min": 133.0
+          },
+          "taf_cond_ceiling_min_ft": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-03T05:52:00Z",
+            "source_age_min": 133.0
+          },
+          "taf_cond_gust_max_kt": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-03T05:52:00Z",
+            "source_age_min": 133.0
+          },
+          "taf_cond_crosswind_max_kt": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-03T05:52:00Z",
+            "source_age_min": 133.0
+          },
+          "taf_ts_prevailing": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-03T05:52:00Z",
+            "source_age_min": 133.0
+          },
+          "taf_ts_conditional": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-02-03T05:52:00Z",
+            "source_age_min": 133.0
+          }
+        }
+      },
+      "flags": [
+        "retrospective_schedule"
+      ],
+      "limitations": [],
+      "advisory_possible": false,
+      "advisory_reason": "no adverse weather feature or wide interval at T: nothing to act on"
+    },
+    {
+      "prediction_id": "3bbf0f55d9c2850d519b3490f11bdbc58d02aae6f2ae5a27c748eedec058791a",
+      "model": "lgbm_release_departure_delay_gt45_v1_calibrated",
+      "target": "departure_delay_gt45",
+      "target_label": "severe departure delay (>45 min, operated flights)",
+      "cohort": "retrospective_schedule_v1",
+      "split": "test",
+      "airport": "KATL",
+      "horizon": 12,
+      "as_of_utc": "2025-06-23T00:05:00Z",
+      "target_start_utc": "2025-06-23T12:05:00Z",
+      "prediction": {
+        "estimate": 0.023521932612841703,
+        "p10": null,
+        "p90": null,
+        "unit": "binary",
+        "status": "available",
+        "reason_codes": [
+          "retrospective_schedule"
+        ]
+      },
+      "outcome": {
+        "y_true": 1.0,
+        "error": -0.9764780673871583,
+        "abs_error": 0.9764780673871583
+      },
+      "baselines": {
+        "baseline_conditional_rate_v1": {
+          "estimate": 0.041427538681560565,
+          "status": "available",
+          "reason_codes": [
+            "retrospective_schedule"
+          ]
+        },
+        "baseline_logistic_v1": {
+          "estimate": 0.06704720129588414,
+          "status": "available",
+          "reason_codes": [
+            "retrospective_schedule"
+          ]
+        }
+      },
+      "explanation_status": "ok",
+      "known_at_issue": {
+        "snapshot_key": "31fca37b521ebbf9a3ee6eb2bf0c82ff",
+        "feature_version": "weather-features/0.2.0",
+        "feature_status": "ok",
+        "feature_reason_codes": [],
+        "source_ages_min": {
+          "metar_age_min": 13.0,
+          "taf_age_min": 41.0
+        },
+        "taf_lead_h": 12.683333396911621,
+        "sources": [
+          {
+            "feature_group": "metar_latest",
+            "source_record_id": "150f7cd0ff4d901964f78c7ec28a158c",
+            "source_ref": "metar/metar_KATL_20221230_20250801.csv#line=25477",
+            "available_at_utc": "2025-06-23T00:02:00Z",
+            "age_min": 3.0
+          },
+          {
+            "feature_group": "metar_window",
+            "source_record_id": "window:28491095e8c18f38c48c7966356e8c4b",
+            "source_ref": "weather_observations: airport_icao, available_at_utc in (as_of - 6h, as_of], observed_at_utc <= as_of",
+            "available_at_utc": "2025-06-23T00:02:00Z",
+            "age_min": 3.0
+          },
+          {
+            "feature_group": "taf",
+            "source_record_id": "39d209c00e334579ee8abfa7fe935f2d",
+            "source_ref": "202506222324-KFFC-FTUS42-TAFATL#00",
+            "available_at_utc": "2025-06-22T23:34:00Z",
+            "age_min": 31.0
+          }
+        ],
+        "features": {
+          "target_hour_utc": {
+            "value": 12,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "target_hour_local": {
+            "value": 8,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "target_weekday_local": {
+            "value": 0,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "target_month_local": {
+            "value": 6,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "metar_age_min": {
+            "value": 13.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-06-23T00:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_wind_status": {
+            "value": "directional",
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-06-23T00:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_wind_kt": {
+            "value": 6.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-06-23T00:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_gust_kt": {
+            "value": null,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-06-23T00:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_headwind_kt_hdg": {
+            "value": 4.596266746520996,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-06-23T00:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_tailwind_kt_hdg": {
+            "value": 0.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-06-23T00:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_tailwind_kt_rec": {
+            "value": 4.596266746520996,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-06-23T00:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_crosswind_kt": {
+            "value": 3.8567256927490234,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-06-23T00:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_headwind_kt_best": {
+            "value": 4.596266746520996,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-06-23T00:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_best_end": {
+            "value": "hdg",
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-06-23T00:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_gust_crosswind_kt": {
+            "value": 3.8567256927490234,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-06-23T00:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_gust_tailwind_kt_hdg": {
+            "value": 0.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-06-23T00:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_gust_tailwind_kt_rec": {
+            "value": 4.596266746520996,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-06-23T00:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_visibility_sm": {
+            "value": 10.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-06-23T00:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_ceiling_ft": {
+            "value": null,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-06-23T00:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_ceiling_none": {
+            "value": true,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-06-23T00:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_temp_dewpoint_spread_c": {
+            "value": 13.333333015441895,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-06-23T00:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_pressure_tendency_3h_hpa": {
+            "value": 0.3386389911174774,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-06-23T00:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_reports_3h": {
+            "value": 3,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-06-23T00:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_wind_max_kt_3h": {
+            "value": 7.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-06-23T00:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_gust_max_kt_3h": {
+            "value": null,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-06-23T00:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_visibility_min_sm_1h": {
+            "value": 10.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-06-23T00:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_visibility_min_sm_3h": {
+            "value": 10.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-06-23T00:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_ceiling_min_ft_3h": {
+            "value": null,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-06-23T00:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_precip_max_mm_1h": {
+            "value": 0.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-06-23T00:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_precip_max_mm_6h": {
+            "value": 0.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-06-23T00:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_ts_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-06-23T00:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_fz_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-06-23T00:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_sn_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-06-23T00:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_fg_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-06-23T00:02:00Z",
+            "source_age_min": 3.0
+          },
+          "metar_ra_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-06-23T00:02:00Z",
+            "source_age_min": 3.0
+          },
+          "taf_age_min": {
+            "value": 41.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-06-22T23:34:00Z",
+            "source_age_min": 31.0
+          },
+          "taf_lead_h": {
+            "value": 12.683333396911621,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-06-22T23:34:00Z",
+            "source_age_min": 31.0
+          },
+          "taf_is_amendment": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-06-22T23:34:00Z",
+            "source_age_min": 31.0
+          },
+          "taf_wind_status": {
+            "value": "variable",
+            "source_group": "taf",
+            "source_available_at_utc": "2025-06-22T23:34:00Z",
+            "source_age_min": 31.0
+          },
+          "taf_wind_max_kt": {
+            "value": 3.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-06-22T23:34:00Z",
+            "source_age_min": 31.0
+          },
+          "taf_gust_max_kt": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-06-22T23:34:00Z",
+            "source_age_min": 31.0
+          },
+          "taf_crosswind_max_kt": {
+            "value": 3.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-06-22T23:34:00Z",
+            "source_age_min": 31.0
+          },
+          "taf_tailwind_max_kt_hdg": {
+            "value": 3.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-06-22T23:34:00Z",
+            "source_age_min": 31.0
+          },
+          "taf_tailwind_max_kt_rec": {
+            "value": 3.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-06-22T23:34:00Z",
+            "source_age_min": 31.0
+          },
+          "taf_gust_crosswind_max_kt": {
+            "value": 3.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-06-22T23:34:00Z",
+            "source_age_min": 31.0
+          },
+          "taf_visibility_min_sm": {
+            "value": 6.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-06-22T23:34:00Z",
+            "source_age_min": 31.0
+          },
+          "taf_ceiling_min_ft": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-06-22T23:34:00Z",
+            "source_age_min": 31.0
+          },
+          "taf_ceiling_none": {
+            "value": true,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-06-22T23:34:00Z",
+            "source_age_min": 31.0
+          },
+          "taf_tempo": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-06-22T23:34:00Z",
+            "source_age_min": 31.0
+          },
+          "taf_prob_max": {
+            "value": 0.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-06-22T23:34:00Z",
+            "source_age_min": 31.0
+          },
+          "taf_cond_visibility_min_sm": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-06-22T23:34:00Z",
+            "source_age_min": 31.0
+          },
+          "taf_cond_ceiling_min_ft": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-06-22T23:34:00Z",
+            "source_age_min": 31.0
+          },
+          "taf_cond_gust_max_kt": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-06-22T23:34:00Z",
+            "source_age_min": 31.0
+          },
+          "taf_cond_crosswind_max_kt": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-06-22T23:34:00Z",
+            "source_age_min": 31.0
+          },
+          "taf_ts_prevailing": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-06-22T23:34:00Z",
+            "source_age_min": 31.0
+          },
+          "taf_ts_conditional": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-06-22T23:34:00Z",
+            "source_age_min": 31.0
+          }
+        }
+      },
+      "flags": [
+        "retrospective_schedule"
+      ],
+      "limitations": [
+        {
+          "code": "large_error_long_horizon",
+          "text": "large error at long horizon"
+        }
+      ],
+      "advisory_possible": false,
+      "advisory_reason": "no adverse weather feature or wide interval at T: nothing to act on"
+    },
+    {
+      "prediction_id": "5a09a5d20d341f8f615279f32d3c0aebf4dc9acab32461a582784c599abb7c68",
+      "model": "lgbm_release_departure_delay_gt45_v1_calibrated",
+      "target": "departure_delay_gt45",
+      "target_label": "severe departure delay (>45 min, operated flights)",
+      "cohort": "retrospective_schedule_v1",
+      "split": "test",
+      "airport": "KATL",
+      "horizon": 6,
+      "as_of_utc": "2025-05-06T06:03:00Z",
+      "target_start_utc": "2025-05-06T12:03:00Z",
+      "prediction": {
+        "estimate": 0.023521932612841703,
+        "p10": null,
+        "p90": null,
+        "unit": "binary",
+        "status": "available",
+        "reason_codes": [
+          "retrospective_schedule"
+        ]
+      },
+      "outcome": {
+        "y_true": 1.0,
+        "error": -0.9764780673871583,
+        "abs_error": 0.9764780673871583
+      },
+      "baselines": {
+        "baseline_conditional_rate_v1": {
+          "estimate": 0.041427538681560565,
+          "status": "available",
+          "reason_codes": [
+            "retrospective_schedule"
+          ]
+        },
+        "baseline_logistic_v1": {
+          "estimate": 0.03154702219674243,
+          "status": "available",
+          "reason_codes": [
+            "retrospective_schedule"
+          ]
+        }
+      },
+      "explanation_status": "ok",
+      "known_at_issue": {
+        "snapshot_key": "13f4a397e1cf8cfa552ee4b67056b931",
+        "feature_version": "weather-features/0.2.0",
+        "feature_status": "ok",
+        "feature_reason_codes": [],
+        "source_ages_min": {
+          "metar_age_min": 11.0,
+          "taf_age_min": 16.0
+        },
+        "taf_lead_h": 6.266666889190674,
+        "sources": [
+          {
+            "feature_group": "metar_latest",
+            "source_record_id": "bdcd040d686785042f8bac91f8e4627d",
+            "source_ref": "metar/metar_KATL_20221230_20250801.csv#line=24020",
+            "available_at_utc": "2025-05-06T06:02:00Z",
+            "age_min": 1.0
+          },
+          {
+            "feature_group": "metar_window",
+            "source_record_id": "window:8f63f24917f16c6e370ec382d82a0f00",
+            "source_ref": "weather_observations: airport_icao, available_at_utc in (as_of - 6h, as_of], observed_at_utc <= as_of",
+            "available_at_utc": "2025-05-06T06:02:00Z",
+            "age_min": 1.0
+          },
+          {
+            "feature_group": "taf",
+            "source_record_id": "b6f4ff8460c3a0b571f6090d8efd308e",
+            "source_ref": "202505060547-KFFC-FTUS42-TAFATL#00",
+            "available_at_utc": "2025-05-06T05:57:00Z",
+            "age_min": 6.0
+          }
+        ],
+        "features": {
+          "target_hour_utc": {
+            "value": 12,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "target_hour_local": {
+            "value": 8,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "target_weekday_local": {
+            "value": 1,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "target_month_local": {
+            "value": 5,
+            "source_group": "calendar",
+            "source_available_at_utc": null,
+            "source_age_min": null
+          },
+          "metar_age_min": {
+            "value": 11.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-05-06T06:02:00Z",
+            "source_age_min": 1.0
+          },
+          "metar_wind_status": {
+            "value": "calm",
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-05-06T06:02:00Z",
+            "source_age_min": 1.0
+          },
+          "metar_wind_kt": {
+            "value": 0.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-05-06T06:02:00Z",
+            "source_age_min": 1.0
+          },
+          "metar_gust_kt": {
+            "value": null,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-05-06T06:02:00Z",
+            "source_age_min": 1.0
+          },
+          "metar_headwind_kt_hdg": {
+            "value": 0.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-05-06T06:02:00Z",
+            "source_age_min": 1.0
+          },
+          "metar_tailwind_kt_hdg": {
+            "value": -0.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-05-06T06:02:00Z",
+            "source_age_min": 1.0
+          },
+          "metar_tailwind_kt_rec": {
+            "value": -0.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-05-06T06:02:00Z",
+            "source_age_min": 1.0
+          },
+          "metar_crosswind_kt": {
+            "value": 0.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-05-06T06:02:00Z",
+            "source_age_min": 1.0
+          },
+          "metar_headwind_kt_best": {
+            "value": 0.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-05-06T06:02:00Z",
+            "source_age_min": 1.0
+          },
+          "metar_best_end": {
+            "value": null,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-05-06T06:02:00Z",
+            "source_age_min": 1.0
+          },
+          "metar_gust_crosswind_kt": {
+            "value": 0.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-05-06T06:02:00Z",
+            "source_age_min": 1.0
+          },
+          "metar_gust_tailwind_kt_hdg": {
+            "value": -0.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-05-06T06:02:00Z",
+            "source_age_min": 1.0
+          },
+          "metar_gust_tailwind_kt_rec": {
+            "value": -0.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-05-06T06:02:00Z",
+            "source_age_min": 1.0
+          },
+          "metar_visibility_sm": {
+            "value": 10.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-05-06T06:02:00Z",
+            "source_age_min": 1.0
+          },
+          "metar_ceiling_ft": {
+            "value": null,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-05-06T06:02:00Z",
+            "source_age_min": 1.0
+          },
+          "metar_ceiling_none": {
+            "value": true,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-05-06T06:02:00Z",
+            "source_age_min": 1.0
+          },
+          "metar_temp_dewpoint_spread_c": {
+            "value": 5.0,
+            "source_group": "metar_latest",
+            "source_available_at_utc": "2025-05-06T06:02:00Z",
+            "source_age_min": 1.0
+          },
+          "metar_pressure_tendency_3h_hpa": {
+            "value": 0.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-05-06T06:02:00Z",
+            "source_age_min": 1.0
+          },
+          "metar_reports_3h": {
+            "value": 3,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-05-06T06:02:00Z",
+            "source_age_min": 1.0
+          },
+          "metar_wind_max_kt_3h": {
+            "value": 3.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-05-06T06:02:00Z",
+            "source_age_min": 1.0
+          },
+          "metar_gust_max_kt_3h": {
+            "value": null,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-05-06T06:02:00Z",
+            "source_age_min": 1.0
+          },
+          "metar_visibility_min_sm_1h": {
+            "value": 10.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-05-06T06:02:00Z",
+            "source_age_min": 1.0
+          },
+          "metar_visibility_min_sm_3h": {
+            "value": 10.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-05-06T06:02:00Z",
+            "source_age_min": 1.0
+          },
+          "metar_ceiling_min_ft_3h": {
+            "value": null,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-05-06T06:02:00Z",
+            "source_age_min": 1.0
+          },
+          "metar_precip_max_mm_1h": {
+            "value": 0.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-05-06T06:02:00Z",
+            "source_age_min": 1.0
+          },
+          "metar_precip_max_mm_6h": {
+            "value": 0.0,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-05-06T06:02:00Z",
+            "source_age_min": 1.0
+          },
+          "metar_ts_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-05-06T06:02:00Z",
+            "source_age_min": 1.0
+          },
+          "metar_fz_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-05-06T06:02:00Z",
+            "source_age_min": 1.0
+          },
+          "metar_sn_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-05-06T06:02:00Z",
+            "source_age_min": 1.0
+          },
+          "metar_fg_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-05-06T06:02:00Z",
+            "source_age_min": 1.0
+          },
+          "metar_ra_3h": {
+            "value": false,
+            "source_group": "metar_window",
+            "source_available_at_utc": "2025-05-06T06:02:00Z",
+            "source_age_min": 1.0
+          },
+          "taf_age_min": {
+            "value": 16.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-05-06T05:57:00Z",
+            "source_age_min": 6.0
+          },
+          "taf_lead_h": {
+            "value": 6.266666889190674,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-05-06T05:57:00Z",
+            "source_age_min": 6.0
+          },
+          "taf_is_amendment": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-05-06T05:57:00Z",
+            "source_age_min": 6.0
+          },
+          "taf_wind_status": {
+            "value": "variable",
+            "source_group": "taf",
+            "source_available_at_utc": "2025-05-06T05:57:00Z",
+            "source_age_min": 6.0
+          },
+          "taf_wind_max_kt": {
+            "value": 3.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-05-06T05:57:00Z",
+            "source_age_min": 6.0
+          },
+          "taf_gust_max_kt": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-05-06T05:57:00Z",
+            "source_age_min": 6.0
+          },
+          "taf_crosswind_max_kt": {
+            "value": 3.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-05-06T05:57:00Z",
+            "source_age_min": 6.0
+          },
+          "taf_tailwind_max_kt_hdg": {
+            "value": 3.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-05-06T05:57:00Z",
+            "source_age_min": 6.0
+          },
+          "taf_tailwind_max_kt_rec": {
+            "value": 3.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-05-06T05:57:00Z",
+            "source_age_min": 6.0
+          },
+          "taf_gust_crosswind_max_kt": {
+            "value": 3.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-05-06T05:57:00Z",
+            "source_age_min": 6.0
+          },
+          "taf_visibility_min_sm": {
+            "value": 6.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-05-06T05:57:00Z",
+            "source_age_min": 6.0
+          },
+          "taf_ceiling_min_ft": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-05-06T05:57:00Z",
+            "source_age_min": 6.0
+          },
+          "taf_ceiling_none": {
+            "value": true,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-05-06T05:57:00Z",
+            "source_age_min": 6.0
+          },
+          "taf_tempo": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-05-06T05:57:00Z",
+            "source_age_min": 6.0
+          },
+          "taf_prob_max": {
+            "value": 0.0,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-05-06T05:57:00Z",
+            "source_age_min": 6.0
+          },
+          "taf_cond_visibility_min_sm": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-05-06T05:57:00Z",
+            "source_age_min": 6.0
+          },
+          "taf_cond_ceiling_min_ft": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-05-06T05:57:00Z",
+            "source_age_min": 6.0
+          },
+          "taf_cond_gust_max_kt": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-05-06T05:57:00Z",
+            "source_age_min": 6.0
+          },
+          "taf_cond_crosswind_max_kt": {
+            "value": null,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-05-06T05:57:00Z",
+            "source_age_min": 6.0
+          },
+          "taf_ts_prevailing": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-05-06T05:57:00Z",
+            "source_age_min": 6.0
+          },
+          "taf_ts_conditional": {
+            "value": false,
+            "source_group": "taf",
+            "source_available_at_utc": "2025-05-06T05:57:00Z",
+            "source_age_min": 6.0
+          }
+        }
+      },
+      "flags": [
+        "retrospective_schedule"
+      ],
+      "limitations": [],
+      "advisory_possible": false,
+      "advisory_reason": "no adverse weather feature or wide interval at T: nothing to act on"
+    }
+  ]
+}

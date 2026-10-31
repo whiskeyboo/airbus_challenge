@@ -1,0 +1,45 @@
+{
+  "run_id": "frozen_primary_v1",
+  "producer": "airbus_challenge.release",
+  "commit": "7f6c1b3a184d1695c2c2a936948f0d5ac2a26151",
+  "commit_dirty": false,
+  "data_mode": "real",
+  "model_fit_commit": "8e94877d086d2e33f3eec50df597d56bf386cf48",
+  "selection_target_end_utc": "2024-07-01T00:00:00+00:00",
+  "calibration_target_end_utc": "2025-01-01T00:00:00+00:00",
+  "data_snapshot_id": "1caed43e83bc75b409656248320b70d9d43720f80dff348300b379a02ec83980",
+  "prediction_requests_sha256": "ed33806cb26b39658328685fea2e8ffced119ad982d21ba4ba69a3526af32288",
+  "fit_cutoff_utc": "2025-01-01T00:00:00+00:00",
+  "train_airports": [
+    "KATL",
+    "KDFW"
+  ],
+  "scoring_airports": [
+    "KATL",
+    "KDFW"
+  ],
+  "cohort_version": "retrospective_schedule_v1",
+  "experiment": "primary",
+  "release_sha256": "fb2a241f3d43825854a0c83503756aa9014146a9ef88a5d84567cc3b881b93aa",
+  "calibration_applied": true,
+  "calibration_sha256": "84adc461180934fdf5b5bca4100ad13cf655564358701cc947aba01925635efe",
+  "rows": 9004620,
+  "status_counts": {
+    "lgbm_release_reporting_carrier_touchdowns_v1_calibrated|reporting_carrier_touchdowns|available": 40564,
+    "lgbm_release_reporting_carrier_touchdowns_v1_calibrated|reporting_carrier_touchdowns|unavailable": 80,
+    "lgbm_release_departure_delay_gt45_v1_calibrated|departure_delay_gt45|available": 1463625,
+    "lgbm_release_departure_delay_gt45_v1_calibrated|departure_delay_gt45|unavailable": 3275,
+    "lgbm_release_cancellation_v1_calibrated|cancellation|available": 1463625,
+    "lgbm_release_cancellation_v1_calibrated|cancellation|unavailable": 3275,
+    "baseline_conditional_rate_v1|departure_delay_gt45|available": 1466900,
+    "baseline_logistic_v1|departure_delay_gt45|available": 1466900,
+    "baseline_conditional_rate_v1|cancellation|available": 1466900,
+    "baseline_logistic_v1|cancellation|available": 1466900,
+    "baseline_climatology_v1|reporting_carrier_touchdowns|available": 40644,
+    "baseline_schedule_v1|reporting_carrier_touchdowns|available": 40644,
+    "baseline_seasonal_persistence_v1|reporting_carrier_touchdowns|available": 40600,
+    "baseline_seasonal_persistence_v1|reporting_carrier_touchdowns|unavailable": 44,
+    "baseline_persistence_v1|reporting_carrier_touchdowns|available": 40604,
+    "baseline_persistence_v1|reporting_carrier_touchdowns|unavailable": 40
+  }
+}

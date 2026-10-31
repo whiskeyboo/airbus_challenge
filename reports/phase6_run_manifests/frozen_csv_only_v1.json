@@ -1,0 +1,37 @@
+{
+  "run_id": "frozen_csv_only_v1",
+  "producer": "airbus_challenge.release",
+  "commit": "7f6c1b3a184d1695c2c2a936948f0d5ac2a26151",
+  "commit_dirty": false,
+  "data_mode": "real",
+  "model_fit_commit": "8e94877d086d2e33f3eec50df597d56bf386cf48",
+  "selection_target_end_utc": "2024-07-01T00:00:00+00:00",
+  "calibration_target_end_utc": "2025-01-01T00:00:00+00:00",
+  "data_snapshot_id": "1caed43e83bc75b409656248320b70d9d43720f80dff348300b379a02ec83980",
+  "prediction_requests_sha256": "b3a1a7a81b0449e5c04a5436750002d6c09b03baf9162aae217b825b95e3554c",
+  "fit_cutoff_utc": "2025-01-01T00:00:00+00:00",
+  "train_airports": [
+    "KATL",
+    "KDFW"
+  ],
+  "scoring_airports": [
+    "KATL",
+    "KDFW"
+  ],
+  "cohort_version": "csv_only_v1",
+  "experiment": "csv_only",
+  "release_sha256": "fb2a241f3d43825854a0c83503756aa9014146a9ef88a5d84567cc3b881b93aa",
+  "calibration_applied": true,
+  "calibration_sha256": "a36f0fc1b5ca82e77b86f6a1c713039341cbf36c27a4c5823151361febbb5dc8",
+  "rows": 86478,
+  "status_counts": {
+    "lgbm_release_departure_delay_gt45_v1_calibrated|departure_delay_gt45|available": 14377,
+    "lgbm_release_departure_delay_gt45_v1_calibrated|departure_delay_gt45|unavailable": 36,
+    "lgbm_release_all_bts_on_csv_v1|departure_delay_gt45|available": 14377,
+    "lgbm_release_all_bts_on_csv_v1|departure_delay_gt45|unavailable": 36,
+    "baseline_conditional_rate_v1|departure_delay_gt45|available": 14413,
+    "baseline_logistic_v1|departure_delay_gt45|available": 14413,
+    "baseline_conditional_rate_v1|cancellation|available": 14413,
+    "baseline_logistic_v1|cancellation|available": 14413
+  }
+}

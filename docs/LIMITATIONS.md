@@ -1,6 +1,14 @@
 # Limitations: where this fails, and how the user would know
 
-Status at commit `33e8faf`, plus the first real development run (2026-10-31; dev splits only, no 2025 outcomes). Decision IDs refer to [DECISIONS.md](DECISIONS.md); gates to [PHASE_PLAN.md](PHASE_PLAN.md).
+The original development limitations below remain relevant to the historical dashboard models. The one-time 2025 assessment is now complete under decision R12; [the locked report](../reports/PHASE6_RESULTS.md) records the frozen release and its additional failures. The release uses an honest final availability cutoff, excludes unvalidated degraded inputs and has distinct artifacts from the earlier development models.
+
+
+## Locked 2025 findings
+
+- Mean absolute arrival error is 4.60/hour at ATL and 7.11 at DFW on common support, better than the tested baselines. Severe-delay ranking also improves, but that is not sufficient evidence for reliable operational alerts.
+- The nominal 80% arrival interval covers 79.0% at ATL and only 70.7% at DFW. DFW arrival Act event precision is 42.4%, below the 50% calibration target; DFW severe-delay Watch precision is 24.2%, below the 30% target. Severe-delay Act remains disabled at both airports.
+- Thunderstorm arrival RMSE is 14.78/hour at ATL and 20.99 at DFW. Large misses and abstentions are retained. No model, feature, cohort, interval or threshold was changed in response to the test. Improvements prompted by these findings need a fresh untouched assessment.
+- The frozen models and policies are in `reports/phase6_models.tar.gz`; the immutable claims and input hashes are committed with the reports. Historical availability remains simulated; the result does not validate a live feed or certify operational use.
 
 ## Target meaning
 - **There is no true AAR.** The target is arrival throughput (AAR proxy): BTS reporting-carrier wheels-on per UTC hour (O01). It reflects demand as well as capacity, so a quiet hour that is not a capacity cut still scores low. Non-reporting carriers (most cargo, GA) are absent.

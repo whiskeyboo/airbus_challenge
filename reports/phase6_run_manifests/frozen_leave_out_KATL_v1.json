@@ -1,0 +1,32 @@
+{
+  "run_id": "frozen_leave_out_KATL_v1",
+  "producer": "airbus_challenge.release",
+  "commit": "7f6c1b3a184d1695c2c2a936948f0d5ac2a26151",
+  "commit_dirty": false,
+  "data_mode": "real",
+  "model_fit_commit": "8e94877d086d2e33f3eec50df597d56bf386cf48",
+  "selection_target_end_utc": "2024-07-01T00:00:00+00:00",
+  "calibration_target_end_utc": "2025-01-01T00:00:00+00:00",
+  "data_snapshot_id": "1caed43e83bc75b409656248320b70d9d43720f80dff348300b379a02ec83980",
+  "prediction_requests_sha256": "d44cb7b19e8accb2805506bdcef2c47a758c19c66b5997322b0334fccd35b9f0",
+  "fit_cutoff_utc": "2025-01-01T00:00:00+00:00",
+  "train_airports": [
+    "KDFW"
+  ],
+  "scoring_airports": [
+    "KATL"
+  ],
+  "cohort_version": "loao_KATL_v1",
+  "experiment": "leave_out_KATL",
+  "release_sha256": "fb2a241f3d43825854a0c83503756aa9014146a9ef88a5d84567cc3b881b93aa",
+  "calibration_applied": false,
+  "calibration_sha256": "670cd7f37d836bdb36175adb33fa2900d2a15af16e053fcedff022cafed6832b",
+  "rows": 60966,
+  "status_counts": {
+    "lgbm_release_reporting_carrier_touchdowns_v1|reporting_carrier_touchdowns|available": 20258,
+    "lgbm_release_reporting_carrier_touchdowns_v1|reporting_carrier_touchdowns|unavailable": 64,
+    "baseline_transfer_schedule_v1|reporting_carrier_touchdowns|available": 20322,
+    "baseline_persistence_v1|reporting_carrier_touchdowns|available": 20314,
+    "baseline_persistence_v1|reporting_carrier_touchdowns|unavailable": 8
+  }
+}
