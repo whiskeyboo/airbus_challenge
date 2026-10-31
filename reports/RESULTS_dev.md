@@ -1,5 +1,7 @@
 # Results: evaluate_dev
 
+> **Development-only limitations:** The candidates used H1 2024 for early stopping even though their manifests record a 2024-01-01 fit cutoff. Validation results are not independent, and the recorded cutoff does not describe every outcome used in fitting. Some predictions are marked `degraded` without a validated fallback. Treat the metrics as preliminary; calibration and thresholds were also developed on H2 2024. The locked 2025 assessment has not been run. This report uses the earlier primary-cohort label version 0.2.0 and request hash recorded below; it does not represent the later four-cohort candidate.
+
 - Scope: development (2023 train; H1/H2 2024 scored); not the locked 2025 test
 - Scored splits (half-open UTC): calibration 2024-07-01 to 2025-01-01, validation 2024-01-01 to 2024-07-01
 - Commit: 41efc6034787ba4d832c5536cbb0e04cebc946fe (commit_dirty=False)
@@ -269,6 +271,13 @@ Rows issued before the latest fit cutoff are dropped for every model.
 - A model is called better only when its skill CI lies above 0, i.e. excludes the baseline's own value; otherwise it is not distinguishable.
 - Arrival throughput is an AAR proxy: it reflects demand as well as capacity.
 
-Weather slices: none in this report.
+The original evaluator report contains no weather slices. The following separate descriptive slice uses the same primary-cohort development predictions and eligible labels, on common support across all five throughput models. The thunderstorm flag comes from target-hour METARs and is used for evaluation only; non-thunderstorm hours are not necessarily clear. Counts are prediction rows across horizons, not independent hours. No confidence interval was calculated, so this is not a significance claim.
+
+| Airport | LightGBM RMSE, thunderstorm | Prediction rows | LightGBM RMSE, no thunderstorm | Prediction rows |
+|---|---:|---:|---:|---:|
+| KATL | 15.07 | 271 | 6.71 | 17,365 |
+| KDFW | 22.15 | 206 | 8.90 | 17,330 |
+
+See `reports/weather_slices_dev.json` for all five models, source hashes and the unknown-weather rows.
 
 Known limitations: [docs/LIMITATIONS.md](docs/LIMITATIONS.md).

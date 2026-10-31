@@ -14,10 +14,13 @@ from airbus_challenge import explain, recommend
 REPO = Path(__file__).resolve().parents[1]
 APP = REPO / "app/dashboard.py"
 T = pd.Timestamp("2024-05-27 18:00", tz="UTC")
-REAL = all(
-    (REPO / p).exists()
-    for p in (dd.SNAPSHOTS, dd.LINEAGE, dd.HOURLY, dd.REQUESTS, dd.LABELS)
-) and (REPO / "artifacts/baselines_dev/predictions.parquet").exists()
+REAL = (
+    all(
+        (REPO / p).exists()
+        for p in (dd.SNAPSHOTS, dd.LINEAGE, dd.HOURLY, dd.REQUESTS, dd.LABELS)
+    )
+    and (REPO / "artifacts/baselines_dev/predictions.parquet").exists()
+)
 
 
 def utc(s):
@@ -245,19 +248,28 @@ def test_departure_outcomes_exclude_cancelled_flights_from_the_share(root):
 # Product outputs: advisories, brief, failure cases -------------------------------------------
 
 
-def test_advisory_from_saved_rows_abstains_without_reference_and_reads_saved_table(root):
+def test_advisory_from_saved_rows_abstains_without_reference_and_reads_saved_table(
+    root,
+):
     rows = dd.load_run_rows(root, "fixture_run", "KDFW", T)
     assert dd.advisory_models(rows) == ["baseline_persistence_v1"]
     rec = recommend.recommend(dd.advisory_rows(rows), dd.load_reference(root))
-    assert rec["level"] == "abstain" and rec["threshold_label"] == "provisional_until_WP-D7"
+    assert (
+        rec["level"] == "abstain"
+        and rec["threshold_label"] == "provisional_until_WP-D7"
+    )
     comps = dd.component_table(rec)
     six = comps[comps.horizon_h.eq(6)].iloc[0]
     assert six.level == "abstain" and "source_hour_incomplete" in six.reasons
     assert comps[comps.kind.eq("severe_delay")].iloc[0].reasons == "no_prediction_rows"
     assert rec["cancellation"] is None
-    recommend.advisories([rec]).to_parquet(root / dd.ARTIFACTS / "fixture_run/advisories.parquet")
+    recommend.advisories([rec]).to_parquet(
+        root / dd.ARTIFACTS / "fixture_run/advisories.parquet"
+    )
     saved = dd.load_advisories(root, "fixture_run", "KDFW", T)
-    assert len(saved) == len(comps) and set(saved.threshold_label) == {"provisional_until_WP-D7"}
+    assert len(saved) == len(comps) and set(saved.threshold_label) == {
+        "provisional_until_WP-D7"
+    }
 
 
 def test_advisory_rows_keep_one_model_per_kind_candidate_first():
@@ -298,7 +310,9 @@ def no_key(monkeypatch):
     monkeypatch.setattr(explain, "OpenAI", lambda **_: pytest.fail("no network calls"))
 
 
-def test_brief_path_template_by_default_and_insufficient_data_without_drivers(no_key, root):
+def test_brief_path_template_by_default_and_insufficient_data_without_drivers(
+    no_key, root
+):
     stamps = {"as_of_utc": T.isoformat()}
     assert dd.load_drivers(root, "fixture_run", ["p3"]) == []
     out = dd.make_brief(REC, DRIVERS, stamps)
@@ -316,9 +330,14 @@ def test_drivers_and_brief_timestamps_from_run_artifacts(root):
          "value": [1.0, 2.0, 3.0], "contribution": [0.1, -0.5, 9.0],
          "contribution_scale": "touchdowns/hour"}
     ).to_parquet(root / dd.ARTIFACTS / "fixture_run" / dd.DRIVERS)  # fmt: skip
-    assert [d["feature"] for d in dd.load_drivers(root, "fixture_run", ["p3"])] == ["b", "a"]
+    assert [d["feature"] for d in dd.load_drivers(root, "fixture_run", ["p3"])] == [
+        "b",
+        "a",
+    ]
     ev = dd.load_evidence(root, "KDFW", T)
-    stamps = dd.brief_timestamps(T, ev, dd.load_run_rows(root, "fixture_run", "KDFW", T))
+    stamps = dd.brief_timestamps(
+        T, ev, dd.load_run_rows(root, "fixture_run", "KDFW", T)
+    )
     assert stamps == {
         "as_of_utc": "2024-05-27T18:00:00+00:00",
         "metar_available_at_utc": "2024-05-27T17:03:00+00:00",
@@ -348,10 +367,20 @@ def test_failure_cases_present_and_missing(root):
     path.write_text(json.dumps({"run_id": "failures-x", "cases": [case]}))
     assert dd.list_failure_files(root) == [path]
     v = dd.failure_case_view(dd.load_failure_cases(path)["cases"][0])
-    assert (v["summary"]["estimate"], v["summary"]["outcome"], v["summary"]["error"]) == (50.0, 30.0, 20.0)
-    assert v["advisory_possible"] is False and v["advisory_reason"].startswith("no adverse")
-    assert v["limitations"] == ["outside_interval: outcome outside the p10-p90 interval"]
-    assert v["source_ages_min"]["metar_age_min"] == 20.0 and v["sources"].age_min.tolist() == [19.0]
+    assert (
+        v["summary"]["estimate"],
+        v["summary"]["outcome"],
+        v["summary"]["error"],
+    ) == (50.0, 30.0, 20.0)
+    assert v["advisory_possible"] is False and v["advisory_reason"].startswith(
+        "no adverse"
+    )
+    assert v["limitations"] == [
+        "outside_interval: outcome outside the p10-p90 interval"
+    ]
+    assert v["source_ages_min"]["metar_age_min"] == 20.0 and v[
+        "sources"
+    ].age_min.tolist() == [19.0]
     empty = dd.failure_case_view(case | {"known_at_issue": None})
     assert empty["sources"].empty and empty["source_ages_min"] == {}
 
@@ -404,7 +433,10 @@ def test_dashboard_data_reads_parquet_only_through_read():
 # (a) the app renders headlessly ----------------------------------------------------------------
 
 
-@pytest.mark.skipif(not REAL, reason="needs processed data and artifacts/baselines_dev (run airbus_challenge.baselines)")
+@pytest.mark.skipif(
+    not REAL,
+    reason="needs processed data and artifacts/baselines_dev (run airbus_challenge.baselines)",
+)
 def test_app_default_case_renders_and_does_not_load_outcomes(monkeypatch):
     calls = []
     real = dd.load_replay_outcomes
@@ -436,7 +468,10 @@ def test_app_default_case_renders_and_does_not_load_outcomes(monkeypatch):
     assert len(outcome_tables()) == 1
 
 
-@pytest.mark.skipif(not REAL, reason="needs processed data and artifacts/baselines_dev (run airbus_challenge.baselines)")
+@pytest.mark.skipif(
+    not REAL,
+    reason="needs processed data and artifacts/baselines_dev (run airbus_challenge.baselines)",
+)
 def test_app_case_without_predictions_says_so():
     at = AppTest.from_file(str(APP), default_timeout=60).run()
     at.button(key="case_1").click().run()  # KATL 2023-08-11 08:00Z, train split.
@@ -444,3 +479,13 @@ def test_app_case_without_predictions_says_so():
     assert at.title[0].value == "KATL: next 12 hours from 2023-08-11 08:00Z"
     assert any("No predictions for this period" in w.value for w in at.warning)
     assert at.code[0].value.startswith("KATL 110652Z")
+
+
+def test_replay_rejects_locked_test_before_reading_outcomes(root, monkeypatch):
+    def forbidden(*args, **kwargs):
+        pytest.fail("test-period outcomes must not be opened")
+
+    monkeypatch.setattr(dd, "_read", forbidden)
+    with pytest.raises(ValueError, match="Locked test outcomes"):
+        dd.load_replay_outcomes(root, "KDFW", pd.Timestamp("2024-12-31T12:00Z"))
+    assert dd.replay_window_is_development(root, pd.Timestamp("2024-12-31T11:00Z"))

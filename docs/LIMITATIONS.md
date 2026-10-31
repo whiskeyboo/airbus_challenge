@@ -24,6 +24,12 @@ Status at commit `33e8faf`, plus the first real development run (2026-10-31; dev
 ## Severe delay
 - The probability means departure delay > 45 min **given that the flight operates**. Cancelled flights are excluded, not counted as negatives, and the cancellation rate is reported separately (P06). It is not a probability over all scheduled flights.
 
+## Development result cautions
+- **Fit-cutoff mismatch:** both candidate models use H1 2024 labels for early stopping but their saved manifests say `fit_cutoff_utc=2024-01-01`. H1 validation results are not independent of model selection, and the recorded cutoff does not describe all labels used. Correct the fitting protocol and regenerate artifacts before treating the cutoff as enforced or running a locked assessment.
+- **Unvalidated degraded predictions:** the candidate producers mark some incomplete-input predictions `degraded`, but no fallback has been validated under WP-D7. The existing development report includes such predictions; do not treat their degraded status as evidence that the fallback works.
+- **Alert policy:** the dashboard can display provisional advisory levels for runs without a saved calibration policy. Those levels are demonstration-only. Even the calibrated throughput act rule flags many quiet hours because the throughput target reflects demand as well as capacity.
+- **Report scope:** `reports/RESULTS_dev.md` summarises the existing primary-cohort report using label version 0.2.0. It does not represent the newer four-cohort candidate or a 2025 locked assessment.
+
 ## What the first real development run showed
 Numbers below come from producer output (`train.py`, `calibrate.py`) on 2023/2024 data, not yet from the evaluator report with confidence intervals.
 - **Severe delay cannot support flight-level alerts.** On calibration rows (H2 2024; validation was used for early stopping, so it is partly in-sample), PR-AUC is 0.234 at KATL (prevalence 8.9%) and 0.214 at KDFW (12.0%): roughly 2x better than chance at ranking. Brier is only about 4-6% better than predicting the base rate. Recall at 50% precision is about 0.
