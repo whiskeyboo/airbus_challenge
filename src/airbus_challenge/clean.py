@@ -132,7 +132,13 @@ def flights(raw: pd.DataFrame, config: dict, src: dict) -> pd.DataFrame:
     df = pd.DataFrame(index=raw.index)
     keys = flight_keys(raw)
     df["flight_key"] = keys
-    df["source_row_hash"] = raw.fillna("").astype(str).agg("|".join, axis=1).map(digest)
+    df["source_row_hash"] = pd.Series(
+        [
+            digest("|".join(r))
+            for r in raw.fillna("").astype(str).itertuples(index=False, name=None)
+        ],
+        index=raw.index,
+    )
     df["source_record_id"] = [digest(f"{src['sha256']}|{i + 2}") for i in raw.index]
     # v1: canonical key for singletons; retain conflicts and distinguish exact repeats.
     duplicates = keys.duplicated(keep=False)
@@ -309,6 +315,21 @@ def audit(df, config):
     return rows
 
 
+def overnight_rows(df):
+    result = pd.Series(False, index=df.index)
+    for zone in df.dest_timezone.unique():
+        ix = df.dest_timezone[df.dest_timezone == zone].index
+        local_date = (
+            df.loc[ix, "scheduled_arr_utc"].dt.tz_convert(zone).dt.strftime("%Y-%m-%d")
+        )
+        result.loc[ix] = (
+            (local_date > df.loc[ix, "source_flight_date"])
+            .fillna(False)
+            .to_numpy(dtype=bool)
+        )
+    return result
+
+
 def build():
     from airbus_challenge.download import months, sha256, study_window
 
@@ -421,15 +442,7 @@ def build():
                 report["timezone_coverage"].update(
                     dict(zip(df[f"{field}_icao"], df[f"{field}_timezone"]))
                 )
-            overnight = pd.Series(False, index=df.index)
-            for zone in df.dest_timezone.unique():
-                ix = df.dest_timezone[df.dest_timezone == zone].index
-                overnight.loc[ix] = (
-                    df.loc[ix, "scheduled_arr_utc"]
-                    .dt.tz_convert(zone)
-                    .dt.strftime("%Y-%m-%d")
-                    > df.loc[ix, "source_flight_date"]
-                )
+            overnight = overnight_rows(df)
             for name, mask in {
                 "normal": df.timestamp_status.eq("valid"),
                 "cancelled": df.cancelled.fillna(False),
