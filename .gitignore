@@ -5,3 +5,4 @@ docs/source/
 .venv/
 __pycache__/
 .DS_Store
+/reports/fixture/
