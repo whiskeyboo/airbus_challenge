@@ -242,12 +242,42 @@ def prepare() -> dict:
         "optional_experiments_omitted": ["operations feed ablation", "capacity ratio models", "severe-delay LOAO"],
         "separate_audits": "omitted under prior lead instruction; implementation tests required"}
     FREEZE.write_text(json.dumps(frozen, indent=2, default=str))
-    print(FREEZE, "frozen; no test outcomes read", flush=True)
+    print(FREEZE, "prepared; no test outcomes read", flush=True)
+    return seal()
+
+
+def seal() -> dict:
+    """Bind the exact candidate set before the one-time claim, preserving fit provenance."""
+    frozen = json.loads(FREEZE.read_text())
+    if frozen.get("sealed") or (b.LEDGER / f"{BINDING}.json").exists():
+        raise FileExistsError("release already sealed or claimed")
+    if b.source_dirty():
+        raise ValueError("commit release source before sealing")
+    for path, expected in frozen["files_sha256"].items():
+        if sha256(Path(path)) != expected:
+            raise ValueError(f"frozen input changed: {path}")
+    for name, slot in frozen["experiments"].items():
+        policy = json.loads(Path(slot["policy"]).read_text())
+        expected = {}
+        for spec in slot["candidates"]:
+            target, model = spec["target"], spec["model_version"]
+            calibrated = (model in policy.get("calibrators", {}).get(target, {})
+                          or model in policy.get("throughput_interval", {}))
+            expected[target] = [model + "_calibrated" if calibrated else model]
+        if name == "csv_only":
+            expected[fb.SEVERE].append("lgbm_release_all_bts_on_csv_v1")
+            expected[fb.CANCELLATION] = []  # Prespecified cancellation baseline companion.
+        slot["expected_candidates"] = expected
+    frozen.update(model_fit_commit=frozen["commit"], commit=b.git("rev-parse", "HEAD"),
+                  sealed=True, sealed_at_utc=datetime.now(UTC).isoformat())
+    FREEZE.write_text(json.dumps(frozen, indent=2))
     return frozen
 
 
 def verify_frozen(require_claim=False) -> dict:
     frozen = json.loads(FREEZE.read_text())
+    if not frozen.get("sealed"):
+        raise ValueError("seal the exact candidate matrix before assessment")
     if frozen["commit_dirty"] or frozen["commit"] != b.git("rev-parse", "HEAD") or b.source_dirty():
         raise ValueError("release source differs from the clean frozen commit")
     if pd.Timestamp(frozen["fit_cutoff_utc"]) != CUTOFF:
@@ -267,7 +297,7 @@ def claim_batch(frozen):
               "release_sha256": sha256(FREEZE), "claimed_at_utc": datetime.now(UTC).isoformat(),
               "experiments": list(frozen["experiments"])}
     for directory in [b.LEDGER, b.LEDGER_MIRROR]:
-        if (directory / f"{BINDING}.json").exists():
+        if any(directory.glob("*.json")):
             raise FileExistsError("locked release already claimed; never start a second assessment")
     b.LEDGER.mkdir(parents=True, exist_ok=True)
     with (b.LEDGER / f"{BINDING}.json").open("x") as file:
@@ -281,7 +311,8 @@ def baseline_predictions(slot, task, req, fits, hourly):
         tp = fits[train.TARGET]
         if slot["held_out"]:
             line = tp["transfer"]
-            schedule = b.schedule_only(req, hourly, {"airports": {slot["held_out"]: line}}).assign(
+            applied = {"airports": {slot["held_out"]: {k: line[k] for k in ("slope", "intercept")}}}
+            schedule = b.schedule_only(req, hourly, applied).assign(
                 model_version="baseline_transfer_schedule_v1")
             yield schedule
         else:
@@ -353,6 +384,9 @@ def generate(frozen, name):
     tmp.replace(path)
     manifest = {"run_id": slot["run_id"], "producer": "airbus_challenge.release",
         "commit": frozen["commit"], "commit_dirty": False, "data_mode": "real",
+        "model_fit_commit": frozen["model_fit_commit"],
+        "selection_target_end_utc": frozen["selection_target_end_utc"],
+        "calibration_target_end_utc": frozen["calibration_target_end_utc"],
         "data_snapshot_id": slot["data_snapshot_id"], "prediction_requests_sha256": slot["request_sha256"],
         "fit_cutoff_utc": frozen["fit_cutoff_utc"], "train_airports": slot["train_airports"],
         "scoring_airports": slot["scoring_airports"], "cohort_version": slot["cohort"], "experiment": name,
@@ -377,9 +411,9 @@ def assess():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["prepare", "assess"])
+    parser.add_argument("action", choices=["prepare", "seal", "assess"])
     args = parser.parse_args()
-    (prepare if args.action == "prepare" else assess)()
+    {"prepare": prepare, "seal": seal, "assess": assess}[args.action]()
 
 
 if __name__ == "__main__":

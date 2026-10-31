@@ -76,7 +76,7 @@ def frozen(tmp_path, monkeypatch):
     monkeypatch.setattr(r.b, "source_dirty", lambda: False)
     source = tmp_path / "model.txt"
     source.write_text("frozen model")
-    doc = {"approved_by": "lead", "commit": "commit", "commit_dirty": False,
+    doc = {"approved_by": "lead", "commit": "commit", "commit_dirty": False, "sealed": True,
            "fit_cutoff_utc": r.CUTOFF.isoformat(), "experiments": {},
            "files_sha256": {str(source): r.sha256(source)}}
     r.FREEZE.write_text(json.dumps(doc))
@@ -137,3 +137,43 @@ def test_frozen_release_only_accepts_bound_runs_before_opening_predictions(froze
         evaluate.main(["another_run"], locked_test=True, release=True)
     with pytest.raises(ValueError, match="only used for the locked"):
         evaluate.main(["frozen"], release=True)
+
+
+def test_seal_preserves_the_original_clean_fit_commit(frozen):
+    doc, _ = frozen
+    doc.update(sealed=False, commit="original_fit_commit")
+    r.FREEZE.write_text(json.dumps(doc))
+    sealed = r.seal()
+    assert sealed["model_fit_commit"] == "original_fit_commit"
+    assert sealed["commit"] == "commit" and sealed["sealed"]
+    with pytest.raises(FileExistsError, match="already sealed"):
+        r.seal()
+
+
+def test_exact_frozen_candidate_sets_allow_paired_comparisons_but_refuse_extra_models():
+    from conftest import make_requests
+    req = make_requests("KATL", pd.DatetimeIndex([pd.Timestamp("2025-01-02", tz="UTC")]), [3])
+    common = req.assign(split="test", target_kind=r.fb.SEVERE, estimate=.1)
+    one, two = common.assign(model_version="csv_model"), common.assign(model_version="paired_model")
+    expected = {r.fb.SEVERE: ["csv_model", "paired_model"]}
+    table = pd.concat([one, two], ignore_index=True)
+    evaluate.check_locked_candidates(table, expected)
+    with pytest.raises(ValueError, match="frozen matrix"):
+        evaluate.check_locked_candidates(one, expected)
+    with pytest.raises(ValueError, match="frozen matrix"):
+        evaluate.check_locked_candidates(pd.concat([table, common.assign(model_version="unplanned")]), expected)
+    with pytest.raises(ValueError, match="no usable estimate"):
+        evaluate.check_locked_candidates(pd.concat([one, two.assign(estimate=np.nan)]), expected)
+
+
+def test_transfer_inference_projects_numeric_fit_coefficients_from_metadata():
+    from conftest import make_requests
+    req = make_requests("KATL", pd.DatetimeIndex([pd.Timestamp("2025-01-02 12:00", tz="UTC")]), [3])
+    hourly = pd.DataFrame({"airport_icao": ["KATL"] * 2,
+        "hour_start_utc": pd.to_datetime(["2025-01-02 08:00", "2025-01-02 12:00"], utc=True),
+        r.train.TARGET: [20., 35.], "scheduled_arrivals": [25., 40.],
+        "coverage_status": "complete_for_source_scope"})
+    fits = {r.train.TARGET: {"transfer": {"source_airports": ["KDFW"],
+            "slope": .8, "intercept": 2., "n_train": 20}}}
+    frames = list(r.baseline_predictions({"held_out": "KATL"}, "throughput", req, fits, hourly))
+    assert [f.estimate.iloc[0] for f in frames] == [34., 20.]
