@@ -1,3 +1,4 @@
+import argparse
 import hashlib
 import json
 from pathlib import Path
@@ -8,14 +9,14 @@ import pyarrow.parquet as pq
 import yaml
 
 from airbus_challenge.download import sha256
-from airbus_challenge.requests import bounds
+from airbus_challenge.requests import COHORT_VERSION, bounds, cohort_definitions
 
 FLIGHTS = Path("data/processed/flights.parquet")
 REQUESTS = Path("data/processed/prediction_requests.parquet")
 HOURLY = Path("data/processed/airport_hourly.parquet")
 LABELS = Path("data/labels/labels.parquet")
-VERSION = "0.3.0"
-LABEL_VERSION = "0.2.0"
+VERSION = "0.4.0"
+LABEL_VERSION = "0.3.0"
 METRICS = {
     "scheduled_departures": (
         "origin_icao",
@@ -73,6 +74,8 @@ EXCLUSION_REASONS = {
     "missing_source_month": "coverage_incomplete",
     "unknown_cancellation_status": "missing_outcome",
     "missing_departure_delay": "missing_outcome",
+    "missing_capacity_reference": "missing_outcome",
+    "nonpositive_capacity_reference": "missing_outcome",
 }
 LABEL_SCHEMA = pa.schema(
     [
@@ -246,19 +249,26 @@ def airport_hours(flights, icao, start, end, snapshot, complete=True, data_mode=
     return out
 
 
-def label_rows(requests, outcomes, hourly, threshold=45, data_mode="real"):
+def label_rows(
+    requests, outcomes, hourly, threshold=45, data_mode="real", ratio_target=None
+):
     validate_data_mode(data_mode)
     frames = []
     for task, req in requests.groupby("task", sort=False):
         if task == "severe_delay":
-            joined = req.merge(
-                outcomes,
-                on="flight_id",
-                how="left",
-                validate="many_to_one",
-                indicator=True,
+            indexed = (
+                outcomes
+                if outcomes.index.name == "flight_id"
+                else outcomes.set_index("flight_id")
             )
-            missing = joined["_merge"].eq("left_only")
+            if not indexed.index.is_unique:
+                raise ValueError("Duplicate flight_id in outcome lookup")
+            if "_outcome_present" not in indexed:
+                indexed = indexed.assign(_outcome_present=True)
+            joined = req.join(
+                indexed, on="flight_id", how="left", validate="many_to_one"
+            )
+            missing = ~joined._outcome_present.fillna(False).astype(bool)
             for target in ["departure_delay_gt45", "cancellation"]:
                 df = pd.DataFrame(
                     {"prediction_id": joined.prediction_id, "target_kind": target}
@@ -307,6 +317,49 @@ def label_rows(requests, outcomes, hourly, threshold=45, data_mode="real"):
             ).mask(df.eligible)
             df["unit"] = "touchdowns/hour"
             frames.append(df)
+            if ratio_target is not None:
+                # The all-airport P10 reference must not normalize a zero-shot holdout.
+                primary = joined.cohort_version.eq(COHORT_VERSION)
+                ratio = pd.DataFrame(
+                    {
+                        "prediction_id": joined.loc[primary, "prediction_id"],
+                        "target_kind": ratio_target,
+                    }
+                )
+                value = (
+                    joined.loc[primary, ratio_target]
+                    .astype("Float64")
+                    .astype("float64")
+                )
+                status = joined.loc[primary, "capacity_ratio_status"]
+                unknown = status.notna() & ~status.isin(
+                    [
+                        "available",
+                        "throughput_unavailable",
+                        "missing_reference",
+                        "nonpositive_reference",
+                    ]
+                )
+                if unknown.any():
+                    raise ValueError(
+                        f"Unknown capacity_ratio_status: {status.loc[unknown].tolist()}"
+                    )
+                reason = df.loc[primary, "exclusion_reason"].copy()
+                base_eligible = df.loc[primary, "eligible"]
+                reason.loc[base_eligible & status.eq("missing_reference")] = (
+                    "missing_capacity_reference"
+                )
+                reason.loc[base_eligible & status.eq("nonpositive_reference")] = (
+                    "nonpositive_capacity_reference"
+                )
+                ratio["eligible"] = (
+                    base_eligible & status.eq("available") & value.notna()
+                )
+                # An unexplained missing ratio is a broken producer contract, not a guessed reason.
+                ratio["exclusion_reason"] = reason.mask(ratio.eligible)
+                ratio["y_true"] = value.where(ratio.eligible)
+                ratio["unit"] = "ratio"
+                frames.append(ratio)
         else:
             raise ValueError(f"Unknown prediction task: {task}")
     labels = label_exclusions(pd.concat(frames, ignore_index=True))
@@ -617,14 +670,20 @@ def exclusion_audit(hourly, flights, experiment, weather):
     }
 
 
-def build():
+def build(requests_path=None, output_dir=None, reuse_hourly=False):
+    requests_path = Path(requests_path) if requests_path is not None else REQUESTS
+    output_dir = Path(output_dir) if output_dir is not None else None
+    hourly_path = output_dir / "airport_hourly.parquet" if output_dir else HOURLY
+    labels_path = output_dir / "labels.parquet" if output_dir else LABELS
     config = yaml.safe_load(Path("configs/airports.yaml").read_text())
     experiment = yaml.safe_load(Path("configs/experiment.yaml").read_text())
     manifest = json.loads(FLIGHTS.with_suffix(".manifest.json").read_text())
-    request_manifest = json.loads(REQUESTS.with_suffix(".manifest.json").read_text())
+    request_manifest = json.loads(
+        requests_path.with_suffix(".manifest.json").read_text()
+    )
     if (
         sha256(FLIGHTS) != manifest["parquet_sha256"]
-        or sha256(REQUESTS) != request_manifest["parquet_sha256"]
+        or sha256(requests_path) != request_manifest["parquet_sha256"]
     ):
         raise ValueError("Input Parquet hash disagrees with manifest")
     if request_manifest["source_flights_sha256"] != manifest["parquet_sha256"]:
@@ -633,6 +692,17 @@ def build():
     validate_data_mode(data_mode)
     if request_manifest["data_mode"] != data_mode:
         raise ValueError("Requests and flights must have the same data_mode")
+    allowed = cohort_definitions(list(config["airports"]))
+    definitions = request_manifest.get(
+        "cohorts", {COHORT_VERSION: allowed[COHORT_VERSION]}
+    )
+    if any(
+        name not in allowed or definition != allowed[name]
+        for name, definition in definitions.items()
+    ):
+        raise ValueError(
+            "Request cohort definitions disagree with the approved contract"
+        )
     start, end = bounds(experiment)
     # Include the two-day lookback for the first issue-time operational baselines.
     start -= pd.Timedelta(days=2)
@@ -658,32 +728,60 @@ def build():
         "dep_delay_min",
         "quality_flags",
     ]
-    flights = pd.read_parquet(FLIGHTS, columns=columns)
-    frames = [
-        airport_hours(
-            flights, icao, start, end, manifest["parquet_sha256"], data_mode=data_mode
+    if reuse_hourly:
+        cached = json.loads(HOURLY.with_suffix(".manifest.json").read_text())
+        if (
+            sha256(HOURLY) != cached["parquet_sha256"]
+            or cached["source_flights_sha256"] != manifest["parquet_sha256"]
+        ):
+            raise ValueError("Cached hourly outcomes disagree with source hashes")
+        hourly = pd.read_parquet(HOURLY)
+        if set(hourly.data_mode) != {data_mode}:
+            raise ValueError("Cached hourly data_mode disagrees with source")
+        capacity = cached["capacity_ratio"]
+        columns = [
+            "flight_id",
+            "origin_icao",
+            "source_flight_date",
+            "scheduled_dep_utc",
+            "dep_delay_min",
+            "cancelled",
+        ]
+        flights = pd.read_parquet(FLIGHTS, columns=columns)
+    else:
+        flights = pd.read_parquet(FLIGHTS, columns=columns)
+        frames = [
+            airport_hours(
+                flights,
+                icao,
+                start,
+                end,
+                manifest["parquet_sha256"],
+                data_mode=data_mode,
+            )
+            for icao in config["airports"]
+        ]
+        hourly = pd.concat(frames, ignore_index=True)
+    if not reuse_hourly:
+        weather = pd.read_parquet(
+            "data/processed/weather_observations.parquet",
+            columns=[
+                "airport_icao",
+                "observed_at_utc",
+                "wx_codes",
+                "ceiling_ft",
+                "visibility_sm",
+                "ceiling_status",
+                "quality_flags",
+                "source_record_id",
+            ],
         )
-        for icao in config["airports"]
-    ]
-    hourly = pd.concat(frames, ignore_index=True)
-    weather = pd.read_parquet(
-        "data/processed/weather_observations.parquet",
-        columns=[
-            "airport_icao",
-            "observed_at_utc",
-            "wx_codes",
-            "ceiling_ft",
-            "visibility_sm",
-            "ceiling_status",
-            "quality_flags",
-            "source_record_id",
-        ],
-    )
-    hourly, capacity = add_capacity_ratio(
-        hourly, weather, config["airports"], experiment
-    )
-    HOURLY.parent.mkdir(parents=True, exist_ok=True)
-    tmp = HOURLY.with_name(".airport_hourly.parquet.tmp")
+    if not reuse_hourly:
+        hourly, capacity = add_capacity_ratio(
+            hourly, weather, config["airports"], experiment
+        )
+    hourly_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = hourly_path.with_name(".airport_hourly.parquet.tmp")
     table = pa.Table.from_pandas(hourly, preserve_index=False)
     table = table.set_column(
         table.schema.get_field_index("data_mode"),
@@ -691,16 +789,16 @@ def build():
         pa.array(hourly.data_mode, type=pa.string()),
     )
     pq.write_table(table, tmp)
-    tmp.replace(HOURLY)
+    tmp.replace(hourly_path)
     write_manifest(
-        HOURLY,
+        hourly_path,
         len(hourly),
         manifest,
         {
             "label_name": "arrival throughput (AAR proxy)",
             "coverage_status": hourly.coverage_status.value_counts().to_dict(),
             "coverage_policy": "P12: n_resolved counts resolved arrivals; each unresolved arrival contributes once to every plausible UTC hour; unbounded dates use the full local service date plus resolved scheduled arrival hour; exclude labels only above 5% unresolved; source-month quarantine fraction above 1% flags degraded",
-            "coverage_policy_status": "PROPOSED",
+            "coverage_policy_status": "ACCEPTED P12",
             "arrival_month_quality": hourly.assign(
                 month=hourly.hour_start_utc.dt.strftime("%Y-%m")
             )
@@ -713,9 +811,10 @@ def build():
             .to_dict(orient="records"),
             "source_scope": "BTS reporting-carrier flights with departure service months in the source manifest; excludes cancelled movements; diverted arrivals only when DivReachedDest=1",
             "capacity_ratio": capacity,
-            "capacity_weather_sha256": sha256(
-                Path("data/processed/weather_observations.parquet")
-            ),
+            "capacity_weather_sha256": cached["capacity_weather_sha256"]
+            if reuse_hourly
+            else sha256(Path("data/processed/weather_observations.parquet")),
+            "reused_hourly_sha256": cached["parquet_sha256"] if reuse_hourly else None,
             "min_time_utc": start,
             "max_time_exclusive_utc": end,
             "counts_by_airport": hourly.groupby("airport_icao")[
@@ -726,16 +825,27 @@ def build():
             "null_counts": hourly[list(METRICS)].isna().sum().to_dict(),
         },
     )
-    bias = exclusion_audit(hourly, flights, experiment, weather)
-    outcomes = flights[["flight_id", "dep_delay_min", "cancelled", "scheduled_dep_utc"]]
+    if reuse_hourly:
+        previous_labels = json.loads(LABELS.with_suffix(".manifest.json").read_text())
+        bias = previous_labels.get("exclusion_audit")
+        bias_weather_sha = previous_labels.get("bias_weather_sha256")
+    else:
+        bias = exclusion_audit(hourly, flights, experiment, weather)
+        bias_weather_sha = sha256(Path("data/processed/weather_observations.parquet"))
+    outcomes = flights[
+        ["flight_id", "dep_delay_min", "cancelled", "scheduled_dep_utc"]
+    ].set_index("flight_id")
+    if not outcomes.index.is_unique:
+        raise ValueError("Duplicate flight_id in outcome lookup")
+    outcomes["_outcome_present"] = True
     del flights
-    LABELS.parent.mkdir(parents=True, exist_ok=True)
-    tmp = LABELS.with_name(".labels.parquet.tmp")
+    labels_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = labels_path.with_name(".labels.parquet.tmp")
     summaries = []
     exclusion_summaries = []
     rows = 0
     with pq.ParquetWriter(tmp, LABEL_SCHEMA) as writer:
-        for batch in pq.ParquetFile(REQUESTS).iter_batches(
+        for batch in pq.ParquetFile(requests_path).iter_batches(
             batch_size=100_000,
             columns=[
                 "prediction_id",
@@ -744,26 +854,39 @@ def build():
                 "flight_id",
                 "target_start_utc",
                 "data_mode",
+                "cohort_version",
             ],
         ):
             requests = batch.to_pandas()
             if not requests.data_mode.eq(data_mode).fillna(False).all():
                 raise ValueError("Requests table data_mode must match its manifest")
+            if not requests.cohort_version.isin(definitions).all():
+                raise ValueError("Request cohort is absent from its manifest")
             labels = label_rows(
                 requests,
                 outcomes,
                 hourly,
                 experiment["targets"]["severe_delay_threshold_min"],
                 data_mode=data_mode,
+                ratio_target=experiment["targets"]["capacity_ratio"],
             )
             writer.write_table(
                 pa.Table.from_pandas(labels, schema=LABEL_SCHEMA, preserve_index=False)
             )
             rows += len(labels)
-            tasks = requests.set_index("prediction_id").task
+            context = requests.set_index("prediction_id")[["task", "cohort_version"]]
             exclusion_summaries.append(
-                labels.assign(task=labels.prediction_id.map(tasks))
-                .groupby(["task", "exclusion_reason", "exclusion_detail"], dropna=False)
+                labels.join(context, on="prediction_id", validate="many_to_one")
+                .groupby(
+                    [
+                        "cohort_version",
+                        "task",
+                        "target_kind",
+                        "exclusion_reason",
+                        "exclusion_detail",
+                    ],
+                    dropna=False,
+                )
                 .size()
                 .rename("rows")
                 .reset_index()
@@ -774,7 +897,7 @@ def build():
                 .rename("rows")
                 .reset_index()
             )
-    tmp.replace(LABELS)
+    tmp.replace(labels_path)
     summary = (
         pd.concat(summaries)
         .groupby(["target_kind", "eligible"], as_index=False)["rows"]
@@ -784,7 +907,13 @@ def build():
     exclusion_counts = (
         pd.concat(exclusion_summaries)
         .groupby(
-            ["task", "exclusion_reason", "exclusion_detail"],
+            [
+                "cohort_version",
+                "task",
+                "target_kind",
+                "exclusion_reason",
+                "exclusion_detail",
+            ],
             dropna=False,
             as_index=False,
         )["rows"]
@@ -796,7 +925,7 @@ def build():
         .to_dict(orient="records")
     )
     write_manifest(
-        LABELS,
+        labels_path,
         rows,
         manifest,
         {
@@ -805,10 +934,16 @@ def build():
             "summary": summary,
             "exclusion_counts": exclusion_counts,
             "exclusion_reason_mapping": EXCLUSION_REASONS,
+            "cohorts": definitions,
+            "cohort_versions": list(definitions),
+            "capacity_reference_id": capacity["reference_id"],
+            "model_fit_eligibility": "pending WP-D1 release policy and WP-D2 tolerance approval; outcome construction is not model fitting",
+            "candidate_dependency_note": "new cohorts require feature regeneration; existing feature artifacts are not declared compatible",
             "exclusion_audit": bias,
-            "bias_weather_sha256": sha256(
-                Path("data/processed/weather_observations.parquet")
-            ),
+            "bias_weather_sha256": bias_weather_sha,
+            "exclusion_report_status": "reused prior report; no new audit run"
+            if reuse_hourly
+            else "generated with outcomes",
             "availability_policy": "unknown BTS historical publication time; explicit simulated release policy required before enforcing model-fit availability cutoffs",
             "threshold_min": experiment["targets"]["severe_delay_threshold_min"],
             "threshold_operator": "strictly greater than",
@@ -816,10 +951,19 @@ def build():
             "max_target_exclusive_utc": end,
         },
     )
-    print(HOURLY, len(hourly), hourly.coverage_status.value_counts().to_dict())
-    print(LABELS, rows, summary)
+    print(hourly_path, len(hourly), hourly.coverage_status.value_counts().to_dict())
+    print(labels_path, rows, summary)
     return hourly, summary
 
 
 if __name__ == "__main__":
-    build()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--requests", type=Path, default=REQUESTS)
+    parser.add_argument("--output-dir", type=Path)
+    parser.add_argument(
+        "--reuse-hourly",
+        action="store_true",
+        help="Reuse verified frozen hourly outcomes/reference without refitting",
+    )
+    args = parser.parse_args()
+    build(args.requests, args.output_dir, args.reuse_hourly)
