@@ -303,3 +303,291 @@ def test_build_zip_to_parquet_and_match_audit(tmp_path, monkeypatch):
     assert pq.read_schema(module.OUTPUT).field("scheduled_dep_utc").type.tz == "UTC"
     assert not module.OUTPUT.with_name(".flights.parquet.tmp").exists()
     assert module.OUTPUT.with_suffix(".manifest.json").exists()
+
+
+def test_requests_use_schedule_only_and_retain_cancellations():
+    from airbus_challenge.requests import flight_requests
+
+    archive = flights(
+        pd.DataFrame(
+            [row(), row(Flight_Number_Reporting_Airline="124", Cancelled="1")]
+        ),
+        CONFIG,
+        SRC,
+    )
+    start, end = (
+        pd.Timestamp("2023-01-01", tz="UTC"),
+        pd.Timestamp("2023-02-01", tz="UTC"),
+    )
+    before = flight_requests(archive, ["KATL"], [3, 6], start, end, "fixture")
+    changed = archive.copy()
+    changed["cancelled"] = ~changed.cancelled
+    changed["dep_delay_min"] = 5000
+    changed["timestamp_status"] = "quarantined"
+    changed["actual_dep_utc"] = pd.Timestamp("2025-01-01T00:00Z")
+    pd.testing.assert_frame_equal(
+        before, flight_requests(changed, ["KATL"], [3, 6], start, end, "fixture")
+    )
+    assert len(before) == 4
+    assert not {"dep_delay_min", "cancelled", "actual_dep_utc"} & set(before.columns)
+    assert before.prediction_id.is_unique
+    assert (before.target_start_utc - before.as_of_utc).dt.total_seconds().tolist() == [
+        10800,
+        10800,
+        21600,
+        21600,
+    ]
+    assert before.target_end_utc.isna().all()
+
+
+def test_request_hash_and_airport_grid_across_dst():
+    import hashlib
+
+    from airbus_challenge.requests import COHORT_VERSION, airport_requests
+
+    start, end = pd.Timestamp("2023-11-05T04:00Z"), pd.Timestamp("2023-11-05T08:00Z")
+    df = airport_requests(["KATL"], [3], start, end, "fixture", "fixture")
+    assert len(df) == 4
+    assert df.prediction_id.is_unique
+    assert df.target_start_utc.dt.tz_convert("America/New_York").dt.hour.tolist() == [
+        0,
+        1,
+        1,
+        2,
+    ]
+    canonical = f"throughput|KATL||2023-11-05T04:00:00Z|3|{COHORT_VERSION}"
+    assert df.iloc[0].prediction_id == hashlib.sha256(canonical.encode()).hexdigest()
+    assert (df.target_end_utc - df.target_start_utc).eq(pd.Timedelta(hours=1)).all()
+
+
+def test_flight_requests_half_open_target_window():
+    from airbus_challenge.requests import flight_requests
+
+    archive = flights(pd.DataFrame([row()]), CONFIG, SRC)
+    target = pd.Timestamp("2023-01-15T15:00Z")
+    assert (
+        len(
+            flight_requests(
+                archive, ["KATL"], [3], target, target + pd.Timedelta(hours=1)
+            )
+        )
+        == 1
+    )
+    assert flight_requests(
+        archive, ["KATL"], [3], target - pd.Timedelta(hours=1), target
+    ).empty
+
+
+def outcome_fixture(rows):
+    df = flights(pd.DataFrame(rows), CONFIG, SRC)
+    if "raw_DivReachedDest" not in df:
+        df["raw_DivReachedDest"] = pd.Series(pd.NA, index=df.index, dtype="string")
+    return df
+
+
+def test_hourly_p12_counts_cancellations_and_diversions():
+    from airbus_challenge.targets import airport_hours
+
+    rows = [row(Flight_Number_Reporting_Airline=str(i)) for i in range(20)]
+    rows += [
+        row(Flight_Number_Reporting_Airline="cancel", Cancelled="1"),
+        row(Flight_Number_Reporting_Airline="divert", Diverted="1"),
+    ]
+    rows[-2]["Flight_Number_Reporting_Airline"] = "21"
+    rows[-1]["Flight_Number_Reporting_Airline"] = "22"
+    df = outcome_fixture(rows)
+    # One of the twenty operated arrivals has inconsistent clocks: exactly 5% unresolved.
+    df.at[0, "timestamp_status"] = "quarantined"
+    grid = airport_hours(
+        df,
+        "KDFW",
+        pd.Timestamp("2023-01-15T17:00Z"),
+        pd.Timestamp("2023-01-15T19:00Z"),
+        "fixture",
+    )
+    first = grid.iloc[0]
+    assert first.n_resolved == 19
+    assert first.n_unresolved == 1
+    assert first.coverage_fraction == 0.95
+    assert first.coverage_status == "partial"
+    assert first.throughput_label_eligible
+    assert grid.iloc[1].reporting_carrier_touchdowns == 0
+    assert grid.iloc[1].coverage_status == "complete_for_source_scope"
+    assert grid.iloc[1].coverage_fraction == 1
+    df.at[1, "timestamp_status"] = "quarantined"
+    assert (
+        not airport_hours(
+            df,
+            "KDFW",
+            pd.Timestamp("2023-01-15T17:00Z"),
+            pd.Timestamp("2023-01-15T18:00Z"),
+            "fixture",
+        )
+        .iloc[0]
+        .throughput_label_eligible
+    )
+
+
+def test_unbounded_arrival_uses_local_day_not_whole_month():
+    from airbus_challenge.targets import airport_hours
+
+    df = outcome_fixture([row()])
+    df["wheels_on_utc"] = pd.Series(pd.NaT, index=df.index, dtype="datetime64[us, UTC]")
+    df["timestamp_status"] = "quarantined"
+    grid = airport_hours(
+        df,
+        "KDFW",
+        pd.Timestamp("2023-01-15T00:00Z"),
+        pd.Timestamp("2023-01-17T00:00Z"),
+        "fixture",
+    )
+    assert grid.n_unresolved.sum() == 24
+    assert (
+        grid.loc[
+            grid.hour_start_utc.eq(pd.Timestamp("2023-01-15T05:00Z")), "n_unresolved"
+        ].iloc[0]
+        == 0
+    )
+    assert (
+        grid.loc[
+            grid.hour_start_utc.eq(pd.Timestamp("2023-01-16T05:00Z")), "n_unresolved"
+        ].iloc[0]
+        == 1
+    )
+    assert grid.month_degraded.all()
+
+
+def test_missing_source_has_null_counts():
+    from airbus_challenge.targets import airport_hours
+
+    df = outcome_fixture([row()])
+    grid = airport_hours(
+        df,
+        "KDFW",
+        pd.Timestamp("2023-01-15T17:00Z"),
+        pd.Timestamp("2023-01-15T18:00Z"),
+        "fixture",
+        complete=False,
+    )
+    assert grid.reporting_carrier_touchdowns.isna().all()
+    assert grid.coverage_status.eq("missing").all()
+    assert not grid.throughput_label_eligible.any()
+
+
+def test_label_45_46_cancelled_and_other_timestamp_quarantine():
+    from airbus_challenge.requests import flight_requests
+    from airbus_challenge.targets import label_rows
+
+    df = outcome_fixture(
+        [
+            row(DepDelay="45"),
+            row(Flight_Number_Reporting_Airline="124", DepDelay="46"),
+            row(Flight_Number_Reporting_Airline="125", Cancelled="1"),
+        ]
+    )
+    # Actual-clock mismatches are intentionally irrelevant to P12's per-flight delay label.
+    req = flight_requests(
+        df,
+        ["KATL"],
+        [3],
+        pd.Timestamp("2023-01-01T00:00Z"),
+        pd.Timestamp("2023-02-01T00:00Z"),
+        "fixture",
+    )
+    labels = label_rows(
+        req,
+        df[["flight_id", "dep_delay_min", "cancelled", "scheduled_dep_utc"]],
+        pd.DataFrame(),
+    )
+    severe = labels[labels.target_kind.eq("departure_delay_gt45")]
+    assert severe.y_true.iloc[:2].tolist() == [0, 1]
+    assert pd.isna(severe.y_true.iloc[2])
+    assert severe.exclusion_reason.iloc[2] == "cancelled"
+    assert labels[labels.target_kind.eq("cancellation")].y_true.tolist() == [0, 0, 1]
+    assert labels.outcome_available_at_utc.isna().all()
+    assert labels.availability_basis.eq("unknown").all()
+
+
+def test_requests_and_targets_end_to_end_fixture(tmp_path, monkeypatch):
+    import json
+
+    import yaml
+
+    from airbus_challenge import requests, targets
+    from airbus_challenge.download import sha256
+
+    monkeypatch.chdir(tmp_path)
+    Path = type(tmp_path)
+    Path("configs").mkdir()
+    Path("configs/airports.yaml").write_text(yaml.safe_dump(CONFIG))
+    experiment = {
+        "horizons_h": [3, 6],
+        "splits": {"train": {"start": "2023-01-15", "end": "2023-01-16"}},
+        "targets": {"severe_delay_threshold_min": 45},
+    }
+    Path("configs/experiment.yaml").write_text(yaml.safe_dump(experiment))
+    df = outcome_fixture(
+        [
+            row(DepDelay="45"),
+            row(Flight_Number_Reporting_Airline="124", DepDelay="46"),
+            row(Flight_Number_Reporting_Airline="125", Cancelled="1"),
+        ]
+    )
+    Path("data/processed").mkdir(parents=True)
+    df.to_parquet(requests.FLIGHTS, index=False)
+    requests.FLIGHTS.with_suffix(".manifest.json").write_text(
+        json.dumps(
+            {
+                "data_mode": "fixture",
+                "parquet_sha256": sha256(requests.FLIGHTS),
+                "sources": [{"sha256": "fixture", "key": "bts/fixture.zip"}],
+            }
+        )
+    )
+    weather = pd.DataFrame(
+        {
+            "airport_icao": ["KDFW"],
+            "observed_at_utc": [pd.Timestamp("2023-01-15T17:00Z")],
+            "wx_codes": [["TSRA"]],
+            "ceiling_ft": [900.0],
+            "visibility_sm": [2.0],
+        }
+    )
+    weather.to_parquet("data/processed/weather_observations.parquet", index=False)
+    report = requests.build()
+    req = pd.read_parquet(requests.OUTPUT)
+    assert req.data_mode.eq("fixture").all()
+    assert req.prediction_id.is_unique
+    assert report["rows"] == 102
+    hourly, summary = targets.build()
+    labels = pd.read_parquet(targets.LABELS)
+    assert len(labels) == 108
+    assert not labels.duplicated(
+        ["prediction_id", "target_kind", "label_version"]
+    ).any()
+    severe = labels[labels.target_kind.eq("departure_delay_gt45")]
+    assert severe.eligible.sum() == 4
+    assert severe.y_true.dropna().tolist() == [0, 1, 0, 1]
+    assert labels[labels.exclusion_reason.eq("cancelled")].y_true.isna().all()
+    manifest = json.loads(targets.LABELS.with_suffix(".manifest.json").read_text())
+    assert len(manifest["exclusion_audit"]["threshold_sensitivity"]) == 6
+    assert manifest["data_mode"] == "fixture"
+    assert hourly[["airport_icao", "hour_start_utc"]].duplicated().sum() == 0
+    assert summary
+
+
+def test_overnight_audit_handles_unresolved_dst_with_nullable_strings():
+    from airbus_challenge.clean import overnight_rows
+
+    df = outcome_fixture(
+        [
+            row(FlightDate="2023-11-05", CRSDepTime="0130"),
+            row(
+                FlightDate="2023-11-05",
+                Flight_Number_Reporting_Airline="124",
+                CRSDepTime="2330",
+                CRSArrTime="0100",
+            ),
+        ]
+    )
+    assert overnight_rows(df).tolist() == [False, True]
