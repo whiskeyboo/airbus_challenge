@@ -295,3 +295,61 @@ def test_taf_amendment_is_kept_as_a_separate_bulletin():
     assert df.available_at_utc.tolist() == [
         t + iem.TAF_LATENCY for t in df.issued_at_utc
     ]
+
+
+def ts(s):
+    return pd.Timestamp(s, tz="UTC")
+
+
+def test_hour_24_at_end_of_may_is_midnight_on_june_1():
+    pid = "202305301737-KFFC-FTUS42-TAFATL"
+    df = taf(
+        taf_row(
+            pid,
+            "2023-05-30 17:37",
+            "2023-05-30 17:37",
+            "18010KT P6SM SCT050",
+            "Observation",
+        ),
+        # IEM's own fx_valid_end for this group is wrong (2023-05-18 00:00); the raw text wins.
+        taf_row(
+            pid,
+            "2023-05-30 17:37",
+            "2023-05-31 19:00",
+            "PROB30 3119/3124 4SM TSRA BR BKN040CB",
+            "Probability 30",
+            "2023-05-18 00:00",
+        ),
+    )
+    prob = df.iloc[1]
+    assert (prob.valid_from_utc, prob.valid_to_utc) == (
+        ts("2023-05-31 19:00"),
+        ts("2023-06-01 00:00"),
+    )
+    assert "iem_validity_disagrees" in prob.quality_flags
+    assert (df.valid_to_utc > df.valid_from_utc).all()
+
+
+def test_group_times_roll_over_december_to_january():
+    issued = ts("2023-12-31 23:20")
+    assert iem.group_window("TEMPO 3122/3124 BKN008", issued) == (
+        ts("2023-12-31 22:00"),
+        ts("2024-01-01 00:00"),
+    )
+    assert iem.group_window("PROB30 0102/0106 2SM BR", issued) == (
+        ts("2024-01-01 02:00"),
+        ts("2024-01-01 06:00"),
+    )
+    assert iem.group_window("FM010300 00000KT P6SM SKC", issued) == (
+        ts("2024-01-01 03:00"),
+        None,
+    )
+    assert iem.group_window("18010KT P6SM SCT050", issued) == (None, None)
+
+
+def test_bulletin_issued_early_is_moved_to_the_cycle_its_groups_reach():
+    issued = pd.Series([ts("2025-01-08 20:56")])
+    assert iem.bulletin_end(issued)[0] == ts("2025-01-10 00:00")
+    assert iem.bulletin_end(issued, pd.Series([ts("2025-01-10 02:00")]))[0] == ts(
+        "2025-01-10 06:00"
+    )

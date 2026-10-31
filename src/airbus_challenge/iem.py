@@ -36,6 +36,8 @@ FORECAST_TYPES = {
 WIND = re.compile(r"(?:^|\s)(VRB|\d{3})(\d{2,3})(?:G(\d{2,3}))?KT(?=\s|$)")
 SKY = re.compile(r"(?:^|\s)(SKC|NSC|CLR|FEW|SCT|BKN|OVC|VV)(\d{3})?(?:CB|TCU)?(?=\s|$)")
 CEILING_COVERS = {"BKN", "OVC", "VV"}
+PERIOD = re.compile(r"(?:^|\s)(\d{2})(\d{2})/(\d{2})(\d{2})(?=\s|$)")
+FROM = re.compile(r"^FM(\d{2})(\d{2})(\d{2})(?=\s|$)")
 
 
 def airports() -> dict:
@@ -173,10 +175,41 @@ def parse_sky(text: str) -> tuple[list[str], list[float]]:
     return [c for c, _ in layers], [float(h) * 100 if h else None for _, h in layers]
 
 
-def bulletin_end(issued: pd.Series) -> pd.Series:
+def bulletin_end(issued: pd.Series, last_start: pd.Series | None = None) -> pd.Series:
     # Each bulletin belongs to the latest cycle whose routine issuance window (opening
     # TAF_EARLY before the cycle) has started; amendments inherit that cycle's end.
-    return (issued + TAF_EARLY).dt.floor(TAF_CYCLE) + TAF_SPAN
+    # A bulletin issued unusually early is moved to the cycle its own groups reach.
+    end = (issued + TAF_EARLY).dt.floor(TAF_CYCLE) + TAF_SPAN
+    if last_start is None:
+        return end
+    behind = ((last_start - end) // TAF_CYCLE + 1).clip(lower=0)
+    return end + behind * TAF_CYCLE
+
+
+def resolve(day: int, hour: int, minute: int, issued: pd.Timestamp) -> pd.Timestamp:
+    # TAF times carry only day-of-month: take the month that puts the time nearest issuance.
+    # Hour 24 becomes 00Z of the next day.
+    first = issued.normalize().replace(day=1)
+    months = [first + pd.DateOffset(months=k) for k in (-1, 0, 1)]
+    return min(
+        (
+            m + pd.Timedelta(days=day - 1, hours=hour, minutes=minute)
+            for m in months
+            if day <= m.days_in_month
+        ),
+        key=lambda t: abs(t - issued),
+    )
+
+
+def group_window(
+    text: str, issued: pd.Timestamp
+) -> tuple[pd.Timestamp | None, pd.Timestamp | None]:
+    if m := FROM.match(text):
+        return resolve(*map(int, m.groups()), issued), None
+    if m := PERIOD.search(text):
+        d1, h1, d2, h2 = map(int, m.groups())
+        return resolve(d1, h1, 0, issued), resolve(d2, h2, 0, issued)
+    return None, None
 
 
 def taf_table(raw: pd.DataFrame, icao: str, src: dict) -> pd.DataFrame:
@@ -213,9 +246,19 @@ def taf_table(raw: pd.DataFrame, icao: str, src: dict) -> pd.DataFrame:
         df["forecast_type"].str.extract(r"PROB(\d+)")[0].astype("float64") / 100
     )
 
-    df["bulletin_valid_to_utc"] = bulletin_end(df["issued_at_utc"])
-    df["valid_from_utc"] = utc(raw["fx_valid"])
-    df["valid_to_utc"] = prevailing_ends(df).fillna(utc(raw["fx_valid_end"]))
+    # Group times come from the raw text; IEM's fx_valid_end mishandles hour 24.
+    windows = pd.DataFrame(
+        [group_window(t, i) for t, i in zip(raw["raw"], df["issued_at_utc"])],
+        index=df.index,
+        columns=["start", "end"],
+    )
+    iem_start, iem_end = utc(raw["fx_valid"]), utc(raw["fx_valid_end"])
+    df["valid_from_utc"] = utc(windows["start"]).fillna(iem_start)
+    group_end = utc(windows["end"]).fillna(iem_end)
+    rule_end = bulletin_end(df["issued_at_utc"])
+    last_start = df.groupby("bulletin_id")["valid_from_utc"].transform("max")
+    df["bulletin_valid_to_utc"] = bulletin_end(df["issued_at_utc"], last_start)
+    df["valid_to_utc"] = prevailing_ends(df).fillna(group_end)
 
     winds = pd.DataFrame(
         [parse_wind(t) for t in raw["raw"]],
@@ -259,8 +302,12 @@ def taf_table(raw: pd.DataFrame, icao: str, src: dict) -> pd.DataFrame:
             "conflicting_bulletin_versions": conflict,
             "valid_to_clipped_to_bulletin_end": df["valid_to_utc"]
             > df["bulletin_valid_to_utc"],
-            "segment_starts_after_bulletin_end": df["valid_from_utc"]
-            >= df["bulletin_valid_to_utc"],
+            "bulletin_end_extended": df["bulletin_valid_to_utc"] > rule_end,
+            "iem_validity_disagrees": df["valid_from_utc"].ne(iem_start)
+            & (df["forecast_type"] != "prevailing")
+            | group_end.ne(iem_end) & iem_end.notna(),
+            "empty_validity": df["valid_to_utc"].clip(upper=df["bulletin_valid_to_utc"])
+            <= df["valid_from_utc"],
             "iem_is_amendment_disagrees": iem_amd.ne(df["is_amendment"]),
         }
     )
@@ -370,6 +417,12 @@ def build() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     obs = pd.concat([load_metar(i) for i in icaos], ignore_index=True)
     fc = pd.concat([load_taf(i) for i in icaos], ignore_index=True)
     cov = coverage(obs, fc)
+    empty = fc.valid_to_utc <= fc.valid_from_utc
+    assert fc.quality_flags[empty].map(lambda f: "empty_validity" in f).all()
+    print(
+        "segments with valid_to <= valid_from (all flagged empty_validity):",
+        empty.sum(),
+    )
     audit = {
         "coverage": json.loads(cov.astype({"month": str}).to_json(orient="records"))
     }
@@ -387,7 +440,7 @@ def build() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         [source("taf", i) for i in icaos],
         {
             "latency_min": TAF_LATENCY.total_seconds() / 60,
-            "bulletin_end_rule": "floor(issued + 40 min, 6 h) + 30 h",
+            "bulletin_end_rule": "floor(issued + 40 min, 6 h) + 30 h, extended by 6 h steps past the last group start",
             **audit,
         },
     )
