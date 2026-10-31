@@ -1,0 +1,20 @@
+# Replay cases for the dashboard. T is the issue time (UTC, on the hour).
+# Cases in 2023 (train split) have weather evidence but no dev predictions.
+cases:
+  - airport: KDFW
+    t: "2024-05-27T18:00:00Z"
+    title: KDFW thunderstorms, arrivals collapse around 00Z
+    description: >-
+      TS at DFW from late on 27 May 2024; about 4 touchdowns against 85 scheduled
+      in the 00Z hour (validation split). Default case.
+  - airport: KATL
+    t: "2023-08-11T08:00:00Z"
+    title: KATL morning thunderstorms (no predictions)
+    description: >-
+      +TSRA with 1.25 sm visibility at 12Z on 11 Aug 2023. The 05:35Z TAF had TEMPO TSRA
+      for 10-14Z and PROB30 TSRA from 20Z. Train split, so there are no dev predictions.
+  - airport: KDFW
+    t: "2024-06-02T16:00:00Z"
+    title: KDFW afternoon thunderstorm
+    description: >-
+      TS at DFW at 22Z on 2 Jun 2024; about 2 touchdowns against 77 scheduled.
