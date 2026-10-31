@@ -29,14 +29,14 @@ The critical path is agreed availability/cohort contracts → joined snapshots a
 
 ## 2. Lead decisions and dependencies
 
-P10 and P12 are accepted in [DECISIONS.md](DECISIONS.md). Do not reopen them as unapproved prerequisites. The following decisions still need an explicit record before the dependent work is released; planning an option does not accept it.
+P10, P12, WP-D3 and WP-D4 are accepted in [DECISIONS.md](DECISIONS.md). Do not reopen them as unapproved prerequisites. The table distinguishes accepted interfaces from the remaining decisions required before dependent work is released; planning an option does not accept it.
 
 | Plan decision | What must be fixed | Blocks | Safe work before approval |
 |---|---|---|---|
 | WP-D1: label release | Timestamp/latency rule for when archived outcomes are assumed known; how unknown availability is handled; model-fit cutoff enforcement | Real model and label-derived baseline/reference fitting | Fixture implementation, hashes/joins, schedule-only audits |
 | WP-D2: clock tolerance | Approve or revise the proposed ±2 min duration/clock tolerance and version any change | Outcome snapshot used for real fitting and final release | Existing quarantine/coverage reporting and fixtures |
-| WP-D3: cohort meaning | CSV-only fitting population, exact LOAO request membership, training/scoring airport lists and cohort/version manifest fields | Release of new cohort artifacts | Request/ID tests and interface proposal |
-| WP-D4: ratio labels | Add the ratio target to the label/evaluator contract and approve any new specific exclusion details | Ratio labels, baselines and metrics | Existing hourly ratio and fixture consumers |
+| WP-D3: cohort meaning | Accepted by the lead: versioned CSV-only and LOAO memberships and airport-role manifests; see DATA_CONTRACTS §6 | Consumer-side training/scoring selection still required | Implement and stage approved cohorts; rebuild dependent snapshots |
+| WP-D4: ratio labels | Accepted by the lead: primary ratio labels and missing/nonpositive-reference detail mapping; see DATA_CONTRACTS §7 | Downstream baseline/model support still required | Stage approved ratio labels with frozen reference |
 | WP-D5: operational feed | Simulated availability latency, valid source-hour coverage and freshness for lagged operations | Operations-context features and persistence eligibility | Weather-plus-schedule variant; feed fixtures |
 | WP-D6: transfer comparator | Source-airport schedule-only regression and target-airport persistence proposal; target calibration prohibited for strict zero-shot | Comparable LOAO reports | Source-only training fixtures and membership guards |
 | WP-D7: calibration/alerts | Calibration family and time allocation, alert threshold objective/budget, episode matching and sparse fallback validation criteria | Final calibrators, recommendations, alert metrics | Candidate APIs, dev-only curves and UI fixtures |
@@ -71,7 +71,7 @@ WP-D1 applies to label-derived preprocessing as well as model weights. The exist
 | 2-A1c | Freeze stable dataset manifest fields and incorporate WP-D1/D2 decisions | `parquet_sha256`, `rows`, `data_mode`, schema/producer versions and source hashes remain stable; downstream hashes match; label availability and normalizer fitting use the same accepted cutoff policy |
 | 2-A1d | Investigate the reported 2025 ATL volume change using schedule fields only | Report scheduled counts per airport/direction/month, source-day coverage and carrier scope; compare like calendar periods; mutate outcomes without changing the report; call it drift/coverage analysis, with no model tuning or test-error inspection |
 
-Proposed cohort semantics for WP-D3:
+Approved cohort semantics for WP-D3:
 
 - `retrospective_schedule_v1`: primary reporting-carrier experiment; keep its existing IDs stable.
 - `csv_only_v1`: severe-delay task only, with the paired cancellation outcome declared explicitly; no CSV-derived hourly throughput. A true CSV-only model uses sample-member rows in each fit/tune/calibration/score partition. An all-BTS model scored on the CSV subset is a different, clearly named paired analysis; do not conflate them.

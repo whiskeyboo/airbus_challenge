@@ -15,7 +15,7 @@ T = pd.Timestamp("2024-05-27 18:00", tz="UTC")
 REAL = all(
     (REPO / p).exists()
     for p in (dd.SNAPSHOTS, dd.LINEAGE, dd.HOURLY, dd.REQUESTS, dd.LABELS)
-)
+) and (REPO / "artifacts/baselines_dev/predictions.parquet").exists()
 
 
 def utc(s):
@@ -286,7 +286,7 @@ def test_dashboard_data_reads_parquet_only_through_read():
 # (a) the app renders headlessly ----------------------------------------------------------------
 
 
-@pytest.mark.skipif(not REAL, reason="needs the processed data folder")
+@pytest.mark.skipif(not REAL, reason="needs processed data and artifacts/baselines_dev (run airbus_challenge.baselines)")
 def test_app_default_case_renders_and_does_not_load_outcomes(monkeypatch):
     calls = []
     real = dd.load_replay_outcomes
@@ -318,7 +318,7 @@ def test_app_default_case_renders_and_does_not_load_outcomes(monkeypatch):
     assert len(outcome_tables()) == 1
 
 
-@pytest.mark.skipif(not REAL, reason="needs the processed data folder")
+@pytest.mark.skipif(not REAL, reason="needs processed data and artifacts/baselines_dev (run airbus_challenge.baselines)")
 def test_app_case_without_predictions_says_so():
     at = AppTest.from_file(str(APP), default_timeout=60).run()
     at.button(key="case_1").click().run()  # KATL 2023-08-11 08:00Z, train split.

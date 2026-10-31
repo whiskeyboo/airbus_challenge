@@ -122,6 +122,21 @@ Required columns:
 
 A request is in scope for a split, task and `cohort_version` when its target falls in that split and `as_of_utc` is at or after the scope cutoff: the later of the end of train and the latest `fit_cutoff_utc` among the runs evaluated for that task, cohort and target. Earlier rows are dropped for every model, baselines included, and every model must then cover every in-scope request. The report's `scoring_scope` records, per split, the cutoff, the run that set it, rows dropped per model and rows scored; a split left with no rows reports null metrics with reason `no_rows_after_fit_cutoff`. A later-cutoff refit is therefore scored only from its own cutoff, never in-sample. Results are never pooled across cohorts. The CSV-only comparison and each leave-one-airport-out test use their own `cohort_version`; CSV-only versions start with `csv_only`.
 
+### Approved experiment cohorts (WP-D3)
+
+Accepted by the project lead on 2026-10-31. The primary cohort remains `retrospective_schedule_v1`, with unchanged prediction IDs.
+
+| `cohort_version` | Request membership | Fitting and scoring |
+| --- | --- | --- |
+| `retrospective_schedule_v1` | Both tasks for the configured study airports | Fit and score the study airports within the declared chronological partitions |
+| `csv_only_v1` | Only sample-member (`in_provided_csv = true`) study-airport departures, task `severe_delay` | Fit/tune/calibrate/score only these members; paired cancellation labels remain separate; no hourly throughput from the sparse CSV |
+| `loao_<ICAO>_v1` | Both tasks and both study airports, including source-fitting and held-out-scoring rows | Fit only `train_airports` excluding `<ICAO>`; score only `score_airports = [<ICAO>]`; the cohort alone does not enforce consumer-side selection |
+
+The request manifest retains `parquet_sha256`, `rows`, `data_mode`, `schema_version`, producer and source hashes. Version 0.2.0 uses `cohort_versions` and a `cohorts` mapping in place of the old single `cohort_version` manifest field. Each definition records `tasks`, `request_airports`, `train_airports`, `score_airports`, flight membership and `ratio_labels`; a holdout definition additionally records `held_out_airport`. Request table columns do not change.
+
+Only `requests.py` constructs the cohort-specific IDs. Results never pool across cohorts. Models and baseline run manifests must carry the applicable `train_airports` and enforce the scoring population. CSV-only is not a primary all-BTS model merely scored on a sample subset. Strict LOAO cohorts do not receive ratio labels based on the current held-out-airport-fitted P10 normalizer.
+
+
 For flights, `target_start_utc` is the scheduled departure instant and `target_end_utc` is null. For airport tasks, it is the target hour and end is start + 1 hour. `horizon_h` must equal the target-start/as-of difference in hours.
 
 `feature_snapshots` has the same key plus typed feature columns, `feature_version`, `data_snapshot_id`, `status`, `reason_codes`, and source-age fields. The feature registry specifies type, unit, source, transform, missing policy, and serving support for each feature. It is frozen with the model.
@@ -133,6 +148,10 @@ Large rolling features can reference a hashed source partition and bounds if exa
 `features.py` writes `data/processed/feature_snapshots.parquet`, one row per `prediction_id` for both tasks, adding `snapshot_key` and `window_end_utc` (`target_end_utc`, or target start + 1 h for flights). Requests sharing (airport, as_of, target_start, window_end) share one `snapshot_key` and are computed once. Continuous features are float32 in this table (float64 in the interim file). `data/processed/feature_lineage.parquet` is keyed by `snapshot_key` and `feature_group`, not `prediction_id` and `feature_name`; join through `feature_snapshots.snapshot_key` to trace a prediction. `features.py` reads only the weather tables, their manifests, the request columns of `prediction_requests` and `configs/`; a test enforces this on every file open.
 
 Until `prediction_requests` exists, `features.py` writes `data/interim/weather_features_airport_hour.parquet` and `weather_features_lineage_airport_hour.parquet`, keyed by `(airport_icao, as_of_utc, target_start_utc, horizon_h)`. Requests join on that key to gain `prediction_id`. Lineage there is per `feature_group` (the `FEATURES` registry maps features to groups); `metar_window` rows reference a sha256 of the sorted contributor ids.
+
+`registry.py` writes `data/processed/feature_registry.json`, the frozen model-input contract (content-hashed, with the source parquet hashes): name, dtype, unit, table, source, transform, version, missing policy, serving support and `predictor` for every column of `feature_snapshots` and `demand_features`. `train.py` takes model columns only from `registry.model_inputs(task)`, which refuses outcome, identifier and slice names. Source ages (`metar_age_min`, `taf_age_min`, `taf_lead_h`) and `horizon_h` are predictors; keys, status, reason codes and versions are metadata. Demand features are marked replay-only (retrospective schedule).
+
+`demand.py` writes `data/processed/demand_features.parquet`, one row per `prediction_id` for both tasks, with the request keys, `data_mode`, `schedule_knowledge_basis` (retrospective schedule assumed known at every issue time), `demand_version`, `status`, `reason_codes` and scheduled-demand features; `train.py` joins it on `prediction_id`. The anchor hour is `floor(target_start_utc)` at the request airport (the origin for flights). It reads only the request keys, the request manifest's `sources`, and `airport_icao`, `hour_start_utc`, `scheduled_{arrivals,departures}`, `scheduled_*_n_unresolved` and `scheduled_*_coverage_status` from `airport_hourly`; a test enforces this boundary. Missing schedule coverage gives null with `schedule_missing_anchor_hour` or `schedule_missing_neighbour_hour`, never 0; other codes are `schedule_unresolved_anchor_hour` and `schedule_normaliser_undefined`. The 2023 local-hour arrival normaliser uses schedules only.
 
 Weather `reason_codes` (policies in `docs/DECISIONS.md` P13-P15):
 
@@ -161,10 +180,17 @@ Fields: `prediction_id`, `target_kind`, `y_true` (nullable float64), `eligible` 
 | `missing_source_month` | `coverage_incomplete` |
 | `unknown_cancellation_status` | `missing_outcome` |
 | `missing_departure_delay` | `missing_outcome` |
+| `missing_capacity_reference` | `missing_outcome` |
+| `nonpositive_capacity_reference` | `missing_outcome` |
 
 Every prediction request in scope has a label row for each target it is scored on, including excluded ones, so denominators stay visible. A table holds one `label_version`.
 
 Allowed main targets: `official_aar`, `reporting_carrier_touchdowns`, `throughput_over_clear_weather_p95`, `departure_delay_gt45`, `cancellation`. Binary outcomes must be exactly 0 or 1. Labels are outcomes, never features.
+
+WP-D4 was accepted by the project lead on 2026-10-31. Label version/schema 0.3.0 adds ratio rows with the same prediction ID as the primary raw-throughput request. Both `exclusion_reason` and `exclusion_detail` remain null iff eligible. Preserve the underlying P12 exclusion when throughput is ineligible. A missing or nonpositive reference with otherwise eligible throughput produces a null ratio with the approved details above. Unknown producer details remain hard errors. A table contains one label version and one non-null `data_mode`.
+
+Expanded cohorts/labels are first generated in a candidate directory using `requests --cohorts all --output <candidate>/prediction_requests.parquet` and `targets --requests <candidate>/prediction_requests.parquet --output-dir <candidate> --reuse-hourly`. The latter reuses the verified frozen P10 reference and records its input hash. Existing working requests/labels/features are not overwritten during this staging step. Agent 2 must regenerate matching snapshots and lineage before the lead publishes the bundle. WP-D1 (label release), WP-D2 (tolerance approval) and experiment-specific model readiness remain separate gates; constructing labels is not permission to fit or score a model.
+
 
 ## 8. Predictions and serving
 

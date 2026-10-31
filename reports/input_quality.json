@@ -1,0 +1,3084 @@
+{
+  "registry_sha256": "abb975e84595c9dcd98bf2a762050f119fac03009af7c0f4e5f0445586c80435",
+  "inputs_sha256": {
+    "feature_snapshots.parquet": "fe85021607f2709b869142b5b6d74d8a70b34d798ef655ffb8a79961b244583f",
+    "demand_features.parquet": "e7fb22e89dac76e38062d286f210f660477b46be44c2fdafd9d5a216f04a1640"
+  },
+  "note": "Feature inputs only; no outcome columns are read, including for test.",
+  "records": [
+    {
+      "split": "train",
+      "task": "throughput",
+      "airport": "KATL",
+      "horizon_h": 3,
+      "requests": 8760,
+      "snapshot_status": {
+        "ok": 8757,
+        "partial": 3
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 162,
+        "metar_stale": 3
+      },
+      "demand_status": {
+        "ok": 8746,
+        "partial": 14
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 14
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 68.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 68.0,
+          "p95": 145.0
+        },
+        "taf_lead_h": {
+          "median": 4.133333206176758,
+          "p95": 5.416666507720947
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99053,
+        "taf_cond_crosswind_max_kt": 0.99053,
+        "taf_cond_visibility_min_sm": 0.94247,
+        "taf_cond_ceiling_min_ft": 0.93984,
+        "metar_gust_kt": 0.86712,
+        "taf_gust_max_kt": 0.85651,
+        "metar_gust_max_kt_3h": 0.75205,
+        "taf_ceiling_min_ft": 0.55365,
+        "metar_ceiling_ft": 0.46084,
+        "metar_ceiling_min_ft_3h": 0.37397
+      }
+    },
+    {
+      "split": "train",
+      "task": "throughput",
+      "airport": "KATL",
+      "horizon_h": 6,
+      "requests": 8760,
+      "snapshot_status": {
+        "ok": 8757,
+        "partial": 3
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 162,
+        "metar_stale": 3
+      },
+      "demand_status": {
+        "ok": 8746,
+        "partial": 14
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 14
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 68.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 68.0,
+          "p95": 145.0
+        },
+        "taf_lead_h": {
+          "median": 7.133333206176758,
+          "p95": 8.416666984558105
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99384,
+        "taf_cond_crosswind_max_kt": 0.99384,
+        "taf_cond_visibility_min_sm": 0.946,
+        "taf_cond_ceiling_min_ft": 0.94441,
+        "metar_gust_kt": 0.86712,
+        "taf_gust_max_kt": 0.86507,
+        "metar_gust_max_kt_3h": 0.75205,
+        "taf_ceiling_min_ft": 0.56724,
+        "metar_ceiling_ft": 0.4605,
+        "metar_ceiling_min_ft_3h": 0.37363
+      }
+    },
+    {
+      "split": "train",
+      "task": "throughput",
+      "airport": "KATL",
+      "horizon_h": 9,
+      "requests": 8760,
+      "snapshot_status": {
+        "ok": 8757,
+        "partial": 3
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 162,
+        "metar_stale": 3
+      },
+      "demand_status": {
+        "ok": 8746,
+        "partial": 14
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 14
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 68.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 68.0,
+          "p95": 145.0
+        },
+        "taf_lead_h": {
+          "median": 10.133333206176758,
+          "p95": 11.416666984558105
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99441,
+        "taf_cond_crosswind_max_kt": 0.99441,
+        "taf_cond_visibility_min_sm": 0.94053,
+        "taf_cond_ceiling_min_ft": 0.93904,
+        "taf_gust_max_kt": 0.8718,
+        "metar_gust_kt": 0.86712,
+        "metar_gust_max_kt_3h": 0.75205,
+        "taf_ceiling_min_ft": 0.57934,
+        "metar_ceiling_ft": 0.46016,
+        "metar_ceiling_min_ft_3h": 0.37329
+      }
+    },
+    {
+      "split": "train",
+      "task": "throughput",
+      "airport": "KATL",
+      "horizon_h": 12,
+      "requests": 8760,
+      "snapshot_status": {
+        "ok": 8757,
+        "partial": 3
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 162,
+        "metar_stale": 3
+      },
+      "demand_status": {
+        "ok": 8746,
+        "partial": 14
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 14
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 68.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 68.0,
+          "p95": 145.0
+        },
+        "taf_lead_h": {
+          "median": 13.133333206176758,
+          "p95": 14.416666984558105
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99509,
+        "taf_cond_crosswind_max_kt": 0.99509,
+        "taf_cond_visibility_min_sm": 0.93162,
+        "taf_cond_ceiling_min_ft": 0.93082,
+        "taf_gust_max_kt": 0.87831,
+        "metar_gust_kt": 0.86712,
+        "metar_gust_max_kt_3h": 0.75205,
+        "taf_ceiling_min_ft": 0.58676,
+        "metar_ceiling_ft": 0.45982,
+        "metar_ceiling_min_ft_3h": 0.37295
+      }
+    },
+    {
+      "split": "train",
+      "task": "throughput",
+      "airport": "KDFW",
+      "horizon_h": 3,
+      "requests": 8760,
+      "snapshot_status": {
+        "ok": 8756,
+        "partial": 4
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 74,
+        "taf_conflict_fallback": 10,
+        "metar_stale": 4
+      },
+      "demand_status": {
+        "ok": 8726,
+        "partial": 34
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 34
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 67.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 100.0,
+          "p95": 220.0
+        },
+        "taf_lead_h": {
+          "median": 4.666666507720947,
+          "p95": 6.666666507720947
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99269,
+        "taf_cond_crosswind_max_kt": 0.99269,
+        "taf_cond_visibility_min_sm": 0.98094,
+        "taf_cond_ceiling_min_ft": 0.97603,
+        "taf_gust_max_kt": 0.9089,
+        "metar_gust_kt": 0.83345,
+        "metar_gust_max_kt_3h": 0.70434,
+        "taf_ceiling_min_ft": 0.53311,
+        "metar_ceiling_ft": 0.50845,
+        "metar_ceiling_min_ft_3h": 0.43322
+      }
+    },
+    {
+      "split": "train",
+      "task": "throughput",
+      "airport": "KDFW",
+      "horizon_h": 6,
+      "requests": 8760,
+      "snapshot_status": {
+        "ok": 8756,
+        "partial": 4
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 74,
+        "taf_conflict_fallback": 10,
+        "metar_stale": 4
+      },
+      "demand_status": {
+        "ok": 8726,
+        "partial": 34
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 34
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 67.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 100.0,
+          "p95": 220.0
+        },
+        "taf_lead_h": {
+          "median": 7.666666507720947,
+          "p95": 9.666666984558105
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99532,
+        "taf_cond_crosswind_max_kt": 0.99532,
+        "taf_cond_visibility_min_sm": 0.98459,
+        "taf_cond_ceiling_min_ft": 0.98253,
+        "taf_gust_max_kt": 0.90902,
+        "metar_gust_kt": 0.83333,
+        "metar_gust_max_kt_3h": 0.70422,
+        "taf_ceiling_min_ft": 0.53767,
+        "metar_ceiling_ft": 0.50856,
+        "metar_ceiling_min_ft_3h": 0.43333
+      }
+    },
+    {
+      "split": "train",
+      "task": "throughput",
+      "airport": "KDFW",
+      "horizon_h": 9,
+      "requests": 8760,
+      "snapshot_status": {
+        "ok": 8756,
+        "partial": 4
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 74,
+        "taf_conflict_fallback": 10,
+        "metar_stale": 4
+      },
+      "demand_status": {
+        "ok": 8726,
+        "partial": 34
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 34
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 67.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 100.0,
+          "p95": 220.0
+        },
+        "taf_lead_h": {
+          "median": 10.666666984558105,
+          "p95": 12.666666984558105
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99646,
+        "taf_cond_crosswind_max_kt": 0.99646,
+        "taf_cond_ceiling_min_ft": 0.98801,
+        "taf_cond_visibility_min_sm": 0.98721,
+        "taf_gust_max_kt": 0.91073,
+        "metar_gust_kt": 0.83333,
+        "metar_gust_max_kt_3h": 0.70422,
+        "taf_ceiling_min_ft": 0.54018,
+        "metar_ceiling_ft": 0.5089,
+        "metar_ceiling_min_ft_3h": 0.43368
+      }
+    },
+    {
+      "split": "train",
+      "task": "throughput",
+      "airport": "KDFW",
+      "horizon_h": 12,
+      "requests": 8760,
+      "snapshot_status": {
+        "ok": 8756,
+        "partial": 4
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 74,
+        "taf_conflict_fallback": 10,
+        "metar_stale": 4
+      },
+      "demand_status": {
+        "ok": 8726,
+        "partial": 34
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 34
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 67.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 100.0,
+          "p95": 220.0
+        },
+        "taf_lead_h": {
+          "median": 13.666666984558105,
+          "p95": 15.666666984558105
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99646,
+        "taf_cond_crosswind_max_kt": 0.99646,
+        "taf_cond_ceiling_min_ft": 0.99155,
+        "taf_cond_visibility_min_sm": 0.99018,
+        "taf_gust_max_kt": 0.91005,
+        "metar_gust_kt": 0.83333,
+        "metar_gust_max_kt_3h": 0.70422,
+        "taf_ceiling_min_ft": 0.54235,
+        "metar_ceiling_ft": 0.50913,
+        "metar_ceiling_min_ft_3h": 0.43379
+      }
+    },
+    {
+      "split": "train",
+      "task": "severe_delay",
+      "airport": "KATL",
+      "horizon_h": 3,
+      "requests": 336435,
+      "snapshot_status": {
+        "ok": 336400,
+        "partial": 35
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 7420,
+        "metar_stale": 35
+      },
+      "demand_status": {
+        "ok": 335693,
+        "partial": 742
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 742
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 38.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 67.0,
+          "p95": 133.0
+        },
+        "taf_lead_h": {
+          "median": 4.116666793823242,
+          "p95": 5.2166666984558105
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.98435,
+        "taf_cond_crosswind_max_kt": 0.98435,
+        "taf_cond_visibility_min_sm": 0.92063,
+        "taf_cond_ceiling_min_ft": 0.91636,
+        "metar_gust_kt": 0.84903,
+        "taf_gust_max_kt": 0.82341,
+        "metar_gust_max_kt_3h": 0.72598,
+        "taf_ceiling_min_ft": 0.54554,
+        "metar_ceiling_ft": 0.45806,
+        "metar_ceiling_min_ft_3h": 0.3765
+      }
+    },
+    {
+      "split": "train",
+      "task": "severe_delay",
+      "airport": "KATL",
+      "horizon_h": 6,
+      "requests": 336435,
+      "snapshot_status": {
+        "ok": 336421,
+        "partial": 14
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 6911,
+        "metar_stale": 14
+      },
+      "demand_status": {
+        "ok": 335693,
+        "partial": 742
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 742
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 38.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 68.0,
+          "p95": 136.0
+        },
+        "taf_lead_h": {
+          "median": 7.133333206176758,
+          "p95": 8.266666412353516
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99119,
+        "taf_cond_crosswind_max_kt": 0.99119,
+        "taf_cond_visibility_min_sm": 0.92873,
+        "taf_cond_ceiling_min_ft": 0.92533,
+        "metar_gust_kt": 0.8613,
+        "taf_gust_max_kt": 0.83375,
+        "metar_gust_max_kt_3h": 0.76838,
+        "taf_ceiling_min_ft": 0.55097,
+        "metar_ceiling_ft": 0.47157,
+        "metar_ceiling_min_ft_3h": 0.38537
+      }
+    },
+    {
+      "split": "train",
+      "task": "severe_delay",
+      "airport": "KATL",
+      "horizon_h": 9,
+      "requests": 336435,
+      "snapshot_status": {
+        "ok": 336431,
+        "partial": 4
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 5897,
+        "metar_stale": 4
+      },
+      "demand_status": {
+        "ok": 335693,
+        "partial": 742
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 742
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 38.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 68.0,
+          "p95": 133.0
+        },
+        "taf_lead_h": {
+          "median": 10.133333206176758,
+          "p95": 11.216666221618652
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99175,
+        "taf_cond_crosswind_max_kt": 0.99175,
+        "taf_cond_visibility_min_sm": 0.91876,
+        "taf_cond_ceiling_min_ft": 0.91583,
+        "metar_gust_kt": 0.90099,
+        "taf_gust_max_kt": 0.84108,
+        "metar_gust_max_kt_3h": 0.81805,
+        "taf_ceiling_min_ft": 0.55942,
+        "metar_ceiling_ft": 0.47787,
+        "metar_ceiling_min_ft_3h": 0.38521
+      }
+    },
+    {
+      "split": "train",
+      "task": "severe_delay",
+      "airport": "KATL",
+      "horizon_h": 12,
+      "requests": 336435,
+      "snapshot_status": {
+        "ok": 336426,
+        "partial": 9
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 6022,
+        "metar_stale": 9
+      },
+      "demand_status": {
+        "ok": 335693,
+        "partial": 742
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 742
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 38.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 68.0,
+          "p95": 138.0
+        },
+        "taf_lead_h": {
+          "median": 13.133333206176758,
+          "p95": 14.300000190734863
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99327,
+        "taf_cond_crosswind_max_kt": 0.99327,
+        "metar_gust_kt": 0.91852,
+        "taf_cond_visibility_min_sm": 0.90633,
+        "taf_cond_ceiling_min_ft": 0.90488,
+        "taf_gust_max_kt": 0.84676,
+        "metar_gust_max_kt_3h": 0.82017,
+        "taf_ceiling_min_ft": 0.56843,
+        "metar_ceiling_ft": 0.46912,
+        "metar_ceiling_min_ft_3h": 0.37777
+      }
+    },
+    {
+      "split": "train",
+      "task": "severe_delay",
+      "airport": "KDFW",
+      "horizon_h": 3,
+      "requests": 285146,
+      "snapshot_status": {
+        "ok": 285068,
+        "partial": 78
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 2886,
+        "taf_conflict_fallback": 149,
+        "metar_stale": 78
+      },
+      "demand_status": {
+        "ok": 283950,
+        "partial": 1196
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 1196
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 40.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 91.0,
+          "p95": 207.0
+        },
+        "taf_lead_h": {
+          "median": 4.516666889190674,
+          "p95": 6.449999809265137
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.98871,
+        "taf_cond_crosswind_max_kt": 0.98871,
+        "taf_cond_visibility_min_sm": 0.97689,
+        "taf_cond_ceiling_min_ft": 0.96835,
+        "taf_gust_max_kt": 0.89469,
+        "metar_gust_kt": 0.81117,
+        "metar_gust_max_kt_3h": 0.67755,
+        "taf_ceiling_min_ft": 0.53478,
+        "metar_ceiling_ft": 0.50693,
+        "metar_ceiling_min_ft_3h": 0.42885
+      }
+    },
+    {
+      "split": "train",
+      "task": "severe_delay",
+      "airport": "KDFW",
+      "horizon_h": 6,
+      "requests": 285146,
+      "snapshot_status": {
+        "ok": 285075,
+        "partial": 71
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 2638,
+        "taf_conflict_fallback": 361,
+        "metar_stale": 71
+      },
+      "demand_status": {
+        "ok": 283950,
+        "partial": 1196
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 1196
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 40.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 87.0,
+          "p95": 200.0
+        },
+        "taf_lead_h": {
+          "median": 7.449999809265137,
+          "p95": 9.333333015441895
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99171,
+        "taf_cond_crosswind_max_kt": 0.99171,
+        "taf_cond_visibility_min_sm": 0.98219,
+        "taf_cond_ceiling_min_ft": 0.97903,
+        "taf_gust_max_kt": 0.89466,
+        "metar_gust_kt": 0.83648,
+        "metar_gust_max_kt_3h": 0.72973,
+        "taf_ceiling_min_ft": 0.53477,
+        "metar_ceiling_ft": 0.50812,
+        "metar_ceiling_min_ft_3h": 0.43304
+      }
+    },
+    {
+      "split": "train",
+      "task": "severe_delay",
+      "airport": "KDFW",
+      "horizon_h": 9,
+      "requests": 285146,
+      "snapshot_status": {
+        "ok": 285060,
+        "partial": 86
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 2135,
+        "taf_conflict_fallback": 467,
+        "metar_stale": 86
+      },
+      "demand_status": {
+        "ok": 283950,
+        "partial": 1196
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 1196
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 40.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 92.0,
+          "p95": 208.0
+        },
+        "taf_lead_h": {
+          "median": 10.533333778381348,
+          "p95": 12.466666221618652
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99389,
+        "taf_cond_crosswind_max_kt": 0.99389,
+        "taf_cond_visibility_min_sm": 0.98572,
+        "taf_cond_ceiling_min_ft": 0.98493,
+        "taf_gust_max_kt": 0.8964,
+        "metar_gust_kt": 0.88053,
+        "metar_gust_max_kt_3h": 0.78498,
+        "taf_ceiling_min_ft": 0.53343,
+        "metar_ceiling_ft": 0.51423,
+        "metar_ceiling_min_ft_3h": 0.44231
+      }
+    },
+    {
+      "split": "train",
+      "task": "severe_delay",
+      "airport": "KDFW",
+      "horizon_h": 12,
+      "requests": 285146,
+      "snapshot_status": {
+        "ok": 285085,
+        "partial": 61
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 1737,
+        "taf_conflict_fallback": 351,
+        "metar_stale": 61
+      },
+      "demand_status": {
+        "ok": 283950,
+        "partial": 1196
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 1196
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 40.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 86.0,
+          "p95": 199.0
+        },
+        "taf_lead_h": {
+          "median": 13.433333396911621,
+          "p95": 15.316666603088379
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99412,
+        "taf_cond_crosswind_max_kt": 0.99412,
+        "taf_cond_ceiling_min_ft": 0.98845,
+        "taf_cond_visibility_min_sm": 0.98707,
+        "taf_gust_max_kt": 0.89791,
+        "metar_gust_kt": 0.8912,
+        "metar_gust_max_kt_3h": 0.77739,
+        "taf_ceiling_min_ft": 0.53556,
+        "metar_ceiling_ft": 0.52621,
+        "metar_ceiling_min_ft_3h": 0.45376
+      }
+    },
+    {
+      "split": "validation",
+      "task": "throughput",
+      "airport": "KATL",
+      "horizon_h": 3,
+      "requests": 4368,
+      "snapshot_status": {
+        "ok": 4360,
+        "partial": 8
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 93,
+        "metar_stale": 8
+      },
+      "demand_status": {
+        "ok": 4344,
+        "partial": 24
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 24
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 68.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 69.0,
+          "p95": 145.0
+        },
+        "taf_lead_h": {
+          "median": 4.150000095367432,
+          "p95": 5.416666507720947
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99038,
+        "taf_cond_crosswind_max_kt": 0.99038,
+        "taf_cond_visibility_min_sm": 0.95192,
+        "taf_cond_ceiling_min_ft": 0.94162,
+        "metar_gust_kt": 0.81571,
+        "taf_gust_max_kt": 0.80266,
+        "metar_gust_max_kt_3h": 0.69895,
+        "taf_ceiling_min_ft": 0.51374,
+        "metar_ceiling_ft": 0.43681,
+        "metar_ceiling_min_ft_3h": 0.35691
+      }
+    },
+    {
+      "split": "validation",
+      "task": "throughput",
+      "airport": "KATL",
+      "horizon_h": 6,
+      "requests": 4368,
+      "snapshot_status": {
+        "ok": 4360,
+        "partial": 8
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 93,
+        "metar_stale": 8
+      },
+      "demand_status": {
+        "ok": 4344,
+        "partial": 24
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 24
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 68.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 69.0,
+          "p95": 145.0
+        },
+        "taf_lead_h": {
+          "median": 7.150000095367432,
+          "p95": 8.416666984558105
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99245,
+        "taf_cond_crosswind_max_kt": 0.99245,
+        "taf_cond_visibility_min_sm": 0.9565,
+        "taf_cond_ceiling_min_ft": 0.95124,
+        "metar_gust_kt": 0.81593,
+        "taf_gust_max_kt": 0.8054,
+        "metar_gust_max_kt_3h": 0.69918,
+        "taf_ceiling_min_ft": 0.53388,
+        "metar_ceiling_ft": 0.4375,
+        "metar_ceiling_min_ft_3h": 0.3576
+      }
+    },
+    {
+      "split": "validation",
+      "task": "throughput",
+      "airport": "KATL",
+      "horizon_h": 9,
+      "requests": 4368,
+      "snapshot_status": {
+        "ok": 4360,
+        "partial": 8
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 92,
+        "metar_stale": 8
+      },
+      "demand_status": {
+        "ok": 4344,
+        "partial": 24
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 24
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 68.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 69.0,
+          "p95": 145.0
+        },
+        "taf_lead_h": {
+          "median": 10.149999618530273,
+          "p95": 11.416666984558105
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99451,
+        "taf_cond_crosswind_max_kt": 0.99451,
+        "taf_cond_visibility_min_sm": 0.94643,
+        "taf_cond_ceiling_min_ft": 0.94597,
+        "metar_gust_kt": 0.81593,
+        "taf_gust_max_kt": 0.80907,
+        "metar_gust_max_kt_3h": 0.69918,
+        "taf_ceiling_min_ft": 0.55266,
+        "metar_ceiling_ft": 0.43819,
+        "metar_ceiling_min_ft_3h": 0.35829
+      }
+    },
+    {
+      "split": "validation",
+      "task": "throughput",
+      "airport": "KATL",
+      "horizon_h": 12,
+      "requests": 4368,
+      "snapshot_status": {
+        "ok": 4360,
+        "partial": 8
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 92,
+        "metar_stale": 8
+      },
+      "demand_status": {
+        "ok": 4344,
+        "partial": 24
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 24
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 68.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 69.0,
+          "p95": 145.0
+        },
+        "taf_lead_h": {
+          "median": 13.149999618530273,
+          "p95": 14.416666984558105
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99313,
+        "taf_cond_crosswind_max_kt": 0.99313,
+        "taf_cond_ceiling_min_ft": 0.94139,
+        "taf_cond_visibility_min_sm": 0.94071,
+        "metar_gust_kt": 0.81593,
+        "taf_gust_max_kt": 0.8109,
+        "metar_gust_max_kt_3h": 0.69918,
+        "taf_ceiling_min_ft": 0.56181,
+        "metar_ceiling_ft": 0.43842,
+        "metar_ceiling_min_ft_3h": 0.35852
+      }
+    },
+    {
+      "split": "validation",
+      "task": "throughput",
+      "airport": "KDFW",
+      "horizon_h": 3,
+      "requests": 4368,
+      "snapshot_status": {
+        "ok": 4367,
+        "partial": 1
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 34,
+        "metar_stale": 1
+      },
+      "demand_status": {
+        "ok": 4366,
+        "partial": 2
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 2
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 67.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 98.0,
+          "p95": 220.0
+        },
+        "taf_lead_h": {
+          "median": 4.633333206176758,
+          "p95": 6.666666507720947
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99016,
+        "taf_cond_crosswind_max_kt": 0.99016,
+        "taf_cond_visibility_min_sm": 0.97115,
+        "taf_cond_ceiling_min_ft": 0.96474,
+        "taf_gust_max_kt": 0.8837,
+        "metar_gust_kt": 0.78846,
+        "metar_gust_max_kt_3h": 0.63095,
+        "taf_ceiling_min_ft": 0.46589,
+        "metar_ceiling_ft": 0.43864,
+        "metar_ceiling_min_ft_3h": 0.35554
+      }
+    },
+    {
+      "split": "validation",
+      "task": "throughput",
+      "airport": "KDFW",
+      "horizon_h": 6,
+      "requests": 4368,
+      "snapshot_status": {
+        "ok": 4367,
+        "partial": 1
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 34,
+        "metar_stale": 1
+      },
+      "demand_status": {
+        "ok": 4366,
+        "partial": 2
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 2
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 67.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 98.0,
+          "p95": 220.0
+        },
+        "taf_lead_h": {
+          "median": 7.633333206176758,
+          "p95": 9.666666984558105
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.98993,
+        "taf_cond_crosswind_max_kt": 0.98993,
+        "taf_cond_visibility_min_sm": 0.97138,
+        "taf_cond_ceiling_min_ft": 0.96909,
+        "taf_gust_max_kt": 0.88187,
+        "metar_gust_kt": 0.78846,
+        "metar_gust_max_kt_3h": 0.63118,
+        "taf_ceiling_min_ft": 0.47184,
+        "metar_ceiling_ft": 0.43796,
+        "metar_ceiling_min_ft_3h": 0.35508
+      }
+    },
+    {
+      "split": "validation",
+      "task": "throughput",
+      "airport": "KDFW",
+      "horizon_h": 9,
+      "requests": 4368,
+      "snapshot_status": {
+        "ok": 4367,
+        "partial": 1
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 34,
+        "metar_stale": 1
+      },
+      "demand_status": {
+        "ok": 4366,
+        "partial": 2
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 2
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 67.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 98.0,
+          "p95": 220.0
+        },
+        "taf_lead_h": {
+          "median": 10.633333206176758,
+          "p95": 12.666666984558105
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99267,
+        "taf_cond_crosswind_max_kt": 0.99267,
+        "taf_cond_visibility_min_sm": 0.97848,
+        "taf_cond_ceiling_min_ft": 0.97367,
+        "taf_gust_max_kt": 0.87752,
+        "metar_gust_kt": 0.78869,
+        "metar_gust_max_kt_3h": 0.63164,
+        "taf_ceiling_min_ft": 0.48352,
+        "metar_ceiling_ft": 0.43773,
+        "metar_ceiling_min_ft_3h": 0.35508
+      }
+    },
+    {
+      "split": "validation",
+      "task": "throughput",
+      "airport": "KDFW",
+      "horizon_h": 12,
+      "requests": 4368,
+      "snapshot_status": {
+        "ok": 4367,
+        "partial": 1
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 34,
+        "metar_stale": 1
+      },
+      "demand_status": {
+        "ok": 4366,
+        "partial": 2
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 2
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 67.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 98.0,
+          "p95": 220.0
+        },
+        "taf_lead_h": {
+          "median": 13.633333206176758,
+          "p95": 15.666666984558105
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99473,
+        "taf_cond_crosswind_max_kt": 0.99473,
+        "taf_cond_visibility_min_sm": 0.98306,
+        "taf_cond_ceiling_min_ft": 0.97871,
+        "taf_gust_max_kt": 0.87775,
+        "metar_gust_kt": 0.78869,
+        "metar_gust_max_kt_3h": 0.63187,
+        "taf_ceiling_min_ft": 0.49061,
+        "metar_ceiling_ft": 0.4375,
+        "metar_ceiling_min_ft_3h": 0.35485
+      }
+    },
+    {
+      "split": "validation",
+      "task": "severe_delay",
+      "airport": "KATL",
+      "horizon_h": 3,
+      "requests": 167251,
+      "snapshot_status": {
+        "ok": 167124,
+        "partial": 127
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 3416,
+        "metar_stale": 127
+      },
+      "demand_status": {
+        "ok": 166480,
+        "partial": 771
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 771
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 38.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 65.0,
+          "p95": 130.0
+        },
+        "taf_lead_h": {
+          "median": 4.083333492279053,
+          "p95": 5.166666507720947
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.98604,
+        "taf_cond_crosswind_max_kt": 0.98604,
+        "taf_cond_visibility_min_sm": 0.93852,
+        "taf_cond_ceiling_min_ft": 0.92319,
+        "metar_gust_kt": 0.79589,
+        "taf_gust_max_kt": 0.75846,
+        "metar_gust_max_kt_3h": 0.66896,
+        "taf_ceiling_min_ft": 0.51444,
+        "metar_ceiling_ft": 0.44186,
+        "metar_ceiling_min_ft_3h": 0.36486
+      }
+    },
+    {
+      "split": "validation",
+      "task": "severe_delay",
+      "airport": "KATL",
+      "horizon_h": 6,
+      "requests": 167251,
+      "snapshot_status": {
+        "ok": 167136,
+        "partial": 115
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 3732,
+        "metar_stale": 115
+      },
+      "demand_status": {
+        "ok": 166480,
+        "partial": 771
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 771
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 38.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 68.0,
+          "p95": 135.0
+        },
+        "taf_lead_h": {
+          "median": 7.133333206176758,
+          "p95": 8.25
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99106,
+        "taf_cond_crosswind_max_kt": 0.99106,
+        "taf_cond_visibility_min_sm": 0.94454,
+        "taf_cond_ceiling_min_ft": 0.93558,
+        "metar_gust_kt": 0.81338,
+        "taf_gust_max_kt": 0.76404,
+        "metar_gust_max_kt_3h": 0.71578,
+        "taf_ceiling_min_ft": 0.52478,
+        "metar_ceiling_ft": 0.45203,
+        "metar_ceiling_min_ft_3h": 0.37214
+      }
+    },
+    {
+      "split": "validation",
+      "task": "severe_delay",
+      "airport": "KATL",
+      "horizon_h": 9,
+      "requests": 167251,
+      "snapshot_status": {
+        "ok": 167134,
+        "partial": 117
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 3561,
+        "metar_stale": 117
+      },
+      "demand_status": {
+        "ok": 166480,
+        "partial": 771
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 771
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 38.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 66.0,
+          "p95": 132.0
+        },
+        "taf_lead_h": {
+          "median": 10.100000381469727,
+          "p95": 11.199999809265137
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99182,
+        "taf_cond_crosswind_max_kt": 0.99182,
+        "taf_cond_visibility_min_sm": 0.92827,
+        "taf_cond_ceiling_min_ft": 0.92532,
+        "metar_gust_kt": 0.85518,
+        "metar_gust_max_kt_3h": 0.77238,
+        "taf_gust_max_kt": 0.77092,
+        "taf_ceiling_min_ft": 0.5364,
+        "metar_ceiling_ft": 0.45332,
+        "metar_ceiling_min_ft_3h": 0.37401
+      }
+    },
+    {
+      "split": "validation",
+      "task": "severe_delay",
+      "airport": "KATL",
+      "horizon_h": 12,
+      "requests": 167251,
+      "snapshot_status": {
+        "ok": 167140,
+        "partial": 111
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 3818,
+        "metar_stale": 111
+      },
+      "demand_status": {
+        "ok": 166480,
+        "partial": 771
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 771
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 38.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 69.0,
+          "p95": 135.0
+        },
+        "taf_lead_h": {
+          "median": 13.149999618530273,
+          "p95": 14.25
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99013,
+        "taf_cond_crosswind_max_kt": 0.99013,
+        "taf_cond_visibility_min_sm": 0.91932,
+        "taf_cond_ceiling_min_ft": 0.9182,
+        "metar_gust_kt": 0.87536,
+        "metar_gust_max_kt_3h": 0.78028,
+        "taf_gust_max_kt": 0.77605,
+        "taf_ceiling_min_ft": 0.5451,
+        "metar_ceiling_ft": 0.44913,
+        "metar_ceiling_min_ft_3h": 0.35962
+      }
+    },
+    {
+      "split": "validation",
+      "task": "severe_delay",
+      "airport": "KDFW",
+      "horizon_h": 3,
+      "requests": 151498,
+      "snapshot_status": {
+        "ok": 151485,
+        "partial": 13
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 1411,
+        "metar_stale": 13
+      },
+      "demand_status": {
+        "ok": 151414,
+        "partial": 84
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 84
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 37.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 85.0,
+          "p95": 205.0
+        },
+        "taf_lead_h": {
+          "median": 4.416666507720947,
+          "p95": 6.416666507720947
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.98497,
+        "taf_cond_crosswind_max_kt": 0.98497,
+        "taf_cond_visibility_min_sm": 0.9602,
+        "taf_cond_ceiling_min_ft": 0.94745,
+        "taf_gust_max_kt": 0.86473,
+        "metar_gust_kt": 0.7631,
+        "metar_gust_max_kt_3h": 0.5972,
+        "taf_ceiling_min_ft": 0.45954,
+        "metar_ceiling_ft": 0.42886,
+        "metar_ceiling_min_ft_3h": 0.34294
+      }
+    },
+    {
+      "split": "validation",
+      "task": "severe_delay",
+      "airport": "KDFW",
+      "horizon_h": 6,
+      "requests": 151498,
+      "snapshot_status": {
+        "ok": 151494,
+        "partial": 4
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 1169,
+        "metar_stale": 4
+      },
+      "demand_status": {
+        "ok": 151414,
+        "partial": 84
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 84
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 37.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 86.0,
+          "p95": 201.0
+        },
+        "taf_lead_h": {
+          "median": 7.433333396911621,
+          "p95": 9.350000381469727
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.98807,
+        "taf_cond_crosswind_max_kt": 0.98807,
+        "taf_cond_visibility_min_sm": 0.96475,
+        "taf_cond_ceiling_min_ft": 0.95984,
+        "taf_gust_max_kt": 0.86379,
+        "metar_gust_kt": 0.78907,
+        "metar_gust_max_kt_3h": 0.65327,
+        "taf_ceiling_min_ft": 0.45734,
+        "metar_ceiling_ft": 0.43469,
+        "metar_ceiling_min_ft_3h": 0.35348
+      }
+    },
+    {
+      "split": "validation",
+      "task": "severe_delay",
+      "airport": "KDFW",
+      "horizon_h": 9,
+      "requests": 151498,
+      "snapshot_status": {
+        "ok": 151497,
+        "partial": 1
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 930,
+        "metar_stale": 1
+      },
+      "demand_status": {
+        "ok": 151414,
+        "partial": 84
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 84
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 37.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 85.0,
+          "p95": 201.0
+        },
+        "taf_lead_h": {
+          "median": 10.416666984558105,
+          "p95": 12.350000381469727
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99311,
+        "taf_cond_crosswind_max_kt": 0.99311,
+        "taf_cond_visibility_min_sm": 0.97569,
+        "taf_cond_ceiling_min_ft": 0.96816,
+        "taf_gust_max_kt": 0.8612,
+        "metar_gust_kt": 0.82873,
+        "metar_gust_max_kt_3h": 0.70505,
+        "taf_ceiling_min_ft": 0.46762,
+        "metar_ceiling_ft": 0.44272,
+        "metar_ceiling_min_ft_3h": 0.36318
+      }
+    },
+    {
+      "split": "validation",
+      "task": "severe_delay",
+      "airport": "KDFW",
+      "horizon_h": 12,
+      "requests": 151498,
+      "snapshot_status": {
+        "ok": 151498
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 827
+      },
+      "demand_status": {
+        "ok": 151414,
+        "partial": 84
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 84
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 37.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 85.0,
+          "p95": 200.0
+        },
+        "taf_lead_h": {
+          "median": 13.416666984558105,
+          "p95": 15.333333015441895
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99497,
+        "taf_cond_crosswind_max_kt": 0.99497,
+        "taf_cond_visibility_min_sm": 0.97995,
+        "taf_cond_ceiling_min_ft": 0.97212,
+        "taf_gust_max_kt": 0.86178,
+        "metar_gust_kt": 0.84053,
+        "metar_gust_max_kt_3h": 0.69408,
+        "taf_ceiling_min_ft": 0.47656,
+        "metar_ceiling_ft": 0.43586,
+        "metar_ceiling_min_ft_3h": 0.36133
+      }
+    },
+    {
+      "split": "calibration",
+      "task": "throughput",
+      "airport": "KATL",
+      "horizon_h": 3,
+      "requests": 4416,
+      "snapshot_status": {
+        "ok": 4405,
+        "partial": 11
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 93,
+        "metar_stale": 11
+      },
+      "demand_status": {
+        "ok": 4380,
+        "partial": 36
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 36
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 68.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 68.0,
+          "p95": 145.0
+        },
+        "taf_lead_h": {
+          "median": 4.133333206176758,
+          "p95": 5.416666507720947
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99162,
+        "taf_cond_crosswind_max_kt": 0.99162,
+        "taf_cond_visibility_min_sm": 0.94724,
+        "taf_cond_ceiling_min_ft": 0.93637,
+        "metar_gust_kt": 0.89606,
+        "taf_gust_max_kt": 0.88315,
+        "metar_gust_max_kt_3h": 0.7962,
+        "taf_ceiling_min_ft": 0.61436,
+        "metar_ceiling_ft": 0.54121,
+        "metar_ceiling_min_ft_3h": 0.46014
+      }
+    },
+    {
+      "split": "calibration",
+      "task": "throughput",
+      "airport": "KATL",
+      "horizon_h": 6,
+      "requests": 4416,
+      "snapshot_status": {
+        "ok": 4405,
+        "partial": 11
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 93,
+        "metar_stale": 11
+      },
+      "demand_status": {
+        "ok": 4380,
+        "partial": 36
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 36
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 68.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 68.0,
+          "p95": 145.0
+        },
+        "taf_lead_h": {
+          "median": 7.133333206176758,
+          "p95": 8.416666984558105
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99457,
+        "taf_cond_crosswind_max_kt": 0.99457,
+        "taf_cond_visibility_min_sm": 0.95245,
+        "taf_cond_ceiling_min_ft": 0.94543,
+        "metar_gust_kt": 0.89651,
+        "taf_gust_max_kt": 0.88315,
+        "metar_gust_max_kt_3h": 0.79665,
+        "taf_ceiling_min_ft": 0.63406,
+        "metar_ceiling_ft": 0.54053,
+        "metar_ceiling_min_ft_3h": 0.45992
+      }
+    },
+    {
+      "split": "calibration",
+      "task": "throughput",
+      "airport": "KATL",
+      "horizon_h": 9,
+      "requests": 4416,
+      "snapshot_status": {
+        "ok": 4405,
+        "partial": 11
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 94,
+        "metar_stale": 11
+      },
+      "demand_status": {
+        "ok": 4380,
+        "partial": 36
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 36
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 68.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 68.0,
+          "p95": 145.0
+        },
+        "taf_lead_h": {
+          "median": 10.133333206176758,
+          "p95": 11.416666984558105
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99547,
+        "taf_cond_crosswind_max_kt": 0.99547,
+        "taf_cond_visibility_min_sm": 0.94588,
+        "taf_cond_ceiling_min_ft": 0.93999,
+        "metar_gust_kt": 0.89719,
+        "taf_gust_max_kt": 0.88519,
+        "metar_gust_max_kt_3h": 0.79733,
+        "taf_ceiling_min_ft": 0.64153,
+        "metar_ceiling_ft": 0.54031,
+        "metar_ceiling_min_ft_3h": 0.45992
+      }
+    },
+    {
+      "split": "calibration",
+      "task": "throughput",
+      "airport": "KATL",
+      "horizon_h": 12,
+      "requests": 4416,
+      "snapshot_status": {
+        "ok": 4405,
+        "partial": 11
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 94,
+        "metar_stale": 11
+      },
+      "demand_status": {
+        "ok": 4380,
+        "partial": 36
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 36
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 68.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 68.0,
+          "p95": 145.0
+        },
+        "taf_lead_h": {
+          "median": 13.133333206176758,
+          "p95": 14.416666984558105
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99683,
+        "taf_cond_crosswind_max_kt": 0.99683,
+        "taf_cond_visibility_min_sm": 0.94407,
+        "taf_cond_ceiling_min_ft": 0.94067,
+        "metar_gust_kt": 0.89719,
+        "taf_gust_max_kt": 0.88927,
+        "metar_gust_max_kt_3h": 0.79733,
+        "taf_ceiling_min_ft": 0.64062,
+        "metar_ceiling_ft": 0.54076,
+        "metar_ceiling_min_ft_3h": 0.46037
+      }
+    },
+    {
+      "split": "calibration",
+      "task": "throughput",
+      "airport": "KDFW",
+      "horizon_h": 3,
+      "requests": 4416,
+      "snapshot_status": {
+        "ok": 4416
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 48
+      },
+      "demand_status": {
+        "ok": 4385,
+        "partial": 31
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 31
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 67.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 100.0,
+          "p95": 220.0
+        },
+        "taf_lead_h": {
+          "median": 4.666666507720947,
+          "p95": 6.666666507720947
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_crosswind_max_kt": 0.99638,
+        "taf_cond_gust_max_kt": 0.99638,
+        "taf_cond_visibility_min_sm": 0.97849,
+        "taf_cond_ceiling_min_ft": 0.97396,
+        "taf_gust_max_kt": 0.94429,
+        "metar_gust_kt": 0.88904,
+        "metar_gust_max_kt_3h": 0.78963,
+        "taf_ceiling_min_ft": 0.70652,
+        "metar_ceiling_ft": 0.66486,
+        "metar_ceiling_min_ft_3h": 0.59262
+      }
+    },
+    {
+      "split": "calibration",
+      "task": "throughput",
+      "airport": "KDFW",
+      "horizon_h": 6,
+      "requests": 4416,
+      "snapshot_status": {
+        "ok": 4416
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 48
+      },
+      "demand_status": {
+        "ok": 4385,
+        "partial": 31
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 31
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 67.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 100.0,
+          "p95": 220.0
+        },
+        "taf_lead_h": {
+          "median": 7.666666507720947,
+          "p95": 9.666666984558105
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_crosswind_max_kt": 0.9966,
+        "taf_cond_gust_max_kt": 0.9966,
+        "taf_cond_visibility_min_sm": 0.98392,
+        "taf_cond_ceiling_min_ft": 0.9803,
+        "taf_gust_max_kt": 0.94384,
+        "metar_gust_kt": 0.88927,
+        "metar_gust_max_kt_3h": 0.78986,
+        "taf_ceiling_min_ft": 0.70924,
+        "metar_ceiling_ft": 0.66486,
+        "metar_ceiling_min_ft_3h": 0.59239
+      }
+    },
+    {
+      "split": "calibration",
+      "task": "throughput",
+      "airport": "KDFW",
+      "horizon_h": 9,
+      "requests": 4416,
+      "snapshot_status": {
+        "ok": 4416
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 48
+      },
+      "demand_status": {
+        "ok": 4385,
+        "partial": 31
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 31
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 67.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 100.0,
+          "p95": 220.0
+        },
+        "taf_lead_h": {
+          "median": 10.666666984558105,
+          "p95": 12.666666984558105
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_crosswind_max_kt": 0.99706,
+        "taf_cond_gust_max_kt": 0.99706,
+        "taf_cond_ceiling_min_ft": 0.98709,
+        "taf_cond_visibility_min_sm": 0.98641,
+        "taf_gust_max_kt": 0.94407,
+        "metar_gust_kt": 0.88927,
+        "metar_gust_max_kt_3h": 0.78986,
+        "taf_ceiling_min_ft": 0.71332,
+        "metar_ceiling_ft": 0.6644,
+        "metar_ceiling_min_ft_3h": 0.59171
+      }
+    },
+    {
+      "split": "calibration",
+      "task": "throughput",
+      "airport": "KDFW",
+      "horizon_h": 12,
+      "requests": 4416,
+      "snapshot_status": {
+        "ok": 4416
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 48
+      },
+      "demand_status": {
+        "ok": 4385,
+        "partial": 31
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 31
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 67.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 100.0,
+          "p95": 220.0
+        },
+        "taf_lead_h": {
+          "median": 13.666666984558105,
+          "p95": 15.666666984558105
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_crosswind_max_kt": 0.99751,
+        "taf_cond_gust_max_kt": 0.99751,
+        "taf_cond_visibility_min_sm": 0.98913,
+        "taf_cond_ceiling_min_ft": 0.9889,
+        "taf_gust_max_kt": 0.94928,
+        "metar_gust_kt": 0.88927,
+        "metar_gust_max_kt_3h": 0.78963,
+        "taf_ceiling_min_ft": 0.71671,
+        "metar_ceiling_ft": 0.66418,
+        "metar_ceiling_min_ft_3h": 0.59149
+      }
+    },
+    {
+      "split": "calibration",
+      "task": "severe_delay",
+      "airport": "KATL",
+      "horizon_h": 3,
+      "requests": 174657,
+      "snapshot_status": {
+        "ok": 174282,
+        "partial": 375
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 4633,
+        "metar_stale": 375
+      },
+      "demand_status": {
+        "ok": 172619,
+        "partial": 2038
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 2038
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 38.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 65.0,
+          "p95": 131.0
+        },
+        "taf_lead_h": {
+          "median": 4.083333492279053,
+          "p95": 5.183333396911621
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.98544,
+        "taf_cond_crosswind_max_kt": 0.98544,
+        "taf_cond_visibility_min_sm": 0.9226,
+        "taf_cond_ceiling_min_ft": 0.90835,
+        "metar_gust_kt": 0.87793,
+        "taf_gust_max_kt": 0.84698,
+        "metar_gust_max_kt_3h": 0.76852,
+        "taf_ceiling_min_ft": 0.60924,
+        "metar_ceiling_ft": 0.54405,
+        "metar_ceiling_min_ft_3h": 0.46791
+      }
+    },
+    {
+      "split": "calibration",
+      "task": "severe_delay",
+      "airport": "KATL",
+      "horizon_h": 6,
+      "requests": 174657,
+      "snapshot_status": {
+        "ok": 174490,
+        "partial": 167
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 3830,
+        "metar_stale": 167
+      },
+      "demand_status": {
+        "ok": 172619,
+        "partial": 2038
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 2038
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 38.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 68.0,
+          "p95": 133.0
+        },
+        "taf_lead_h": {
+          "median": 7.133333206176758,
+          "p95": 8.216666221618652
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99101,
+        "taf_cond_crosswind_max_kt": 0.99101,
+        "taf_cond_visibility_min_sm": 0.92827,
+        "taf_cond_ceiling_min_ft": 0.91795,
+        "metar_gust_kt": 0.88961,
+        "taf_gust_max_kt": 0.85044,
+        "metar_gust_max_kt_3h": 0.81195,
+        "taf_ceiling_min_ft": 0.63178,
+        "metar_ceiling_ft": 0.55409,
+        "metar_ceiling_min_ft_3h": 0.47567
+      }
+    },
+    {
+      "split": "calibration",
+      "task": "severe_delay",
+      "airport": "KATL",
+      "horizon_h": 9,
+      "requests": 174657,
+      "snapshot_status": {
+        "ok": 174437,
+        "partial": 220
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 2946,
+        "metar_stale": 220
+      },
+      "demand_status": {
+        "ok": 172619,
+        "partial": 2038
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 2038
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 38.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 66.0,
+          "p95": 132.0
+        },
+        "taf_lead_h": {
+          "median": 10.100000381469727,
+          "p95": 11.199999809265137
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99289,
+        "taf_cond_crosswind_max_kt": 0.99289,
+        "metar_gust_kt": 0.92671,
+        "taf_cond_visibility_min_sm": 0.92093,
+        "taf_cond_ceiling_min_ft": 0.91353,
+        "metar_gust_max_kt_3h": 0.857,
+        "taf_gust_max_kt": 0.84917,
+        "taf_ceiling_min_ft": 0.63417,
+        "metar_ceiling_ft": 0.55643,
+        "metar_ceiling_min_ft_3h": 0.47753
+      }
+    },
+    {
+      "split": "calibration",
+      "task": "severe_delay",
+      "airport": "KATL",
+      "horizon_h": 12,
+      "requests": 174657,
+      "snapshot_status": {
+        "ok": 174483,
+        "partial": 174
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 2655,
+        "metar_stale": 174
+      },
+      "demand_status": {
+        "ok": 172619,
+        "partial": 2038
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 2038
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 38.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 68.0,
+          "p95": 134.0
+        },
+        "taf_lead_h": {
+          "median": 13.133333206176758,
+          "p95": 14.233333587646484
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.9946,
+        "taf_cond_crosswind_max_kt": 0.9946,
+        "metar_gust_kt": 0.94221,
+        "taf_cond_visibility_min_sm": 0.92166,
+        "taf_cond_ceiling_min_ft": 0.91514,
+        "metar_gust_max_kt_3h": 0.85928,
+        "taf_gust_max_kt": 0.85257,
+        "taf_ceiling_min_ft": 0.63565,
+        "metar_ceiling_ft": 0.55343,
+        "metar_ceiling_min_ft_3h": 0.46969
+      }
+    },
+    {
+      "split": "calibration",
+      "task": "severe_delay",
+      "airport": "KDFW",
+      "horizon_h": 3,
+      "requests": 162175,
+      "snapshot_status": {
+        "ok": 162175
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 2254
+      },
+      "demand_status": {
+        "ok": 161160,
+        "partial": 1015
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 1015
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 37.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 90.0,
+          "p95": 207.0
+        },
+        "taf_lead_h": {
+          "median": 4.5,
+          "p95": 6.449999809265137
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_crosswind_max_kt": 0.9949,
+        "taf_cond_gust_max_kt": 0.9949,
+        "taf_cond_visibility_min_sm": 0.97181,
+        "taf_cond_ceiling_min_ft": 0.96515,
+        "taf_gust_max_kt": 0.92842,
+        "metar_gust_kt": 0.87525,
+        "metar_gust_max_kt_3h": 0.77715,
+        "taf_ceiling_min_ft": 0.70385,
+        "metar_ceiling_ft": 0.64995,
+        "metar_ceiling_min_ft_3h": 0.58182
+      }
+    },
+    {
+      "split": "calibration",
+      "task": "severe_delay",
+      "airport": "KDFW",
+      "horizon_h": 6,
+      "requests": 162175,
+      "snapshot_status": {
+        "ok": 162175
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 2132
+      },
+      "demand_status": {
+        "ok": 161160,
+        "partial": 1015
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 1015
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 37.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 92.0,
+          "p95": 200.0
+        },
+        "taf_lead_h": {
+          "median": 7.5333333015441895,
+          "p95": 9.333333015441895
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_crosswind_max_kt": 0.99495,
+        "taf_cond_gust_max_kt": 0.99495,
+        "taf_cond_visibility_min_sm": 0.97909,
+        "taf_cond_ceiling_min_ft": 0.97333,
+        "taf_gust_max_kt": 0.92745,
+        "metar_gust_kt": 0.89094,
+        "metar_gust_max_kt_3h": 0.81091,
+        "taf_ceiling_min_ft": 0.70856,
+        "metar_ceiling_ft": 0.66278,
+        "metar_ceiling_min_ft_3h": 0.59691
+      }
+    },
+    {
+      "split": "calibration",
+      "task": "severe_delay",
+      "airport": "KDFW",
+      "horizon_h": 9,
+      "requests": 162175,
+      "snapshot_status": {
+        "ok": 162175
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 1296
+      },
+      "demand_status": {
+        "ok": 161160,
+        "partial": 1015
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 1015
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 37.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 91.0,
+          "p95": 206.0
+        },
+        "taf_lead_h": {
+          "median": 10.516666412353516,
+          "p95": 12.433333396911621
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_crosswind_max_kt": 0.99567,
+        "taf_cond_gust_max_kt": 0.99567,
+        "taf_cond_visibility_min_sm": 0.9841,
+        "taf_cond_ceiling_min_ft": 0.98279,
+        "taf_gust_max_kt": 0.92887,
+        "metar_gust_kt": 0.9176,
+        "metar_gust_max_kt_3h": 0.84356,
+        "taf_ceiling_min_ft": 0.71365,
+        "metar_ceiling_ft": 0.67969,
+        "metar_ceiling_min_ft_3h": 0.60545
+      }
+    },
+    {
+      "split": "calibration",
+      "task": "severe_delay",
+      "airport": "KDFW",
+      "horizon_h": 12,
+      "requests": 162175,
+      "snapshot_status": {
+        "ok": 162175
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 1017
+      },
+      "demand_status": {
+        "ok": 161160,
+        "partial": 1015
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 1015
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 37.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 93.0,
+          "p95": 199.0
+        },
+        "taf_lead_h": {
+          "median": 13.550000190734863,
+          "p95": 15.316666603088379
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_crosswind_max_kt": 0.99679,
+        "taf_cond_gust_max_kt": 0.99679,
+        "taf_cond_visibility_min_sm": 0.98687,
+        "taf_cond_ceiling_min_ft": 0.98595,
+        "taf_gust_max_kt": 0.93604,
+        "metar_gust_kt": 0.92207,
+        "metar_gust_max_kt_3h": 0.8358,
+        "taf_ceiling_min_ft": 0.71894,
+        "metar_ceiling_ft": 0.68778,
+        "metar_ceiling_min_ft_3h": 0.61841
+      }
+    },
+    {
+      "split": "test",
+      "task": "throughput",
+      "airport": "KATL",
+      "horizon_h": 3,
+      "requests": 5088,
+      "snapshot_status": {
+        "ok": 5083,
+        "partial": 5
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 123,
+        "metar_stale": 5
+      },
+      "demand_status": {
+        "ok": 5077,
+        "partial": 11
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 10,
+        "schedule_missing_neighbour_hour": 1
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 68.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 68.0,
+          "p95": 146.0
+        },
+        "taf_lead_h": {
+          "median": 4.133333206176758,
+          "p95": 5.433333396911621
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.97759,
+        "taf_cond_crosswind_max_kt": 0.97759,
+        "taf_cond_visibility_min_sm": 0.92001,
+        "taf_cond_ceiling_min_ft": 0.91686,
+        "metar_gust_kt": 0.84768,
+        "taf_gust_max_kt": 0.83412,
+        "metar_gust_max_kt_3h": 0.73526,
+        "taf_ceiling_min_ft": 0.59119,
+        "metar_ceiling_ft": 0.48565,
+        "metar_ceiling_min_ft_3h": 0.39465
+      }
+    },
+    {
+      "split": "test",
+      "task": "throughput",
+      "airport": "KATL",
+      "horizon_h": 6,
+      "requests": 5088,
+      "snapshot_status": {
+        "ok": 5083,
+        "partial": 5
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 123,
+        "metar_stale": 5
+      },
+      "demand_status": {
+        "ok": 5077,
+        "partial": 11
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 10,
+        "schedule_missing_neighbour_hour": 1
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 68.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 68.0,
+          "p95": 146.0
+        },
+        "taf_lead_h": {
+          "median": 7.133333206176758,
+          "p95": 8.433333396911621
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.9774,
+        "taf_cond_crosswind_max_kt": 0.9774,
+        "taf_cond_visibility_min_sm": 0.91804,
+        "taf_cond_ceiling_min_ft": 0.91608,
+        "metar_gust_kt": 0.84709,
+        "taf_gust_max_kt": 0.83884,
+        "metar_gust_max_kt_3h": 0.73467,
+        "taf_ceiling_min_ft": 0.59552,
+        "metar_ceiling_ft": 0.48624,
+        "metar_ceiling_min_ft_3h": 0.39485
+      }
+    },
+    {
+      "split": "test",
+      "task": "throughput",
+      "airport": "KATL",
+      "horizon_h": 9,
+      "requests": 5088,
+      "snapshot_status": {
+        "ok": 5083,
+        "partial": 5
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 123,
+        "metar_stale": 5
+      },
+      "demand_status": {
+        "ok": 5077,
+        "partial": 11
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 10,
+        "schedule_missing_neighbour_hour": 1
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 68.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 68.0,
+          "p95": 146.0
+        },
+        "taf_lead_h": {
+          "median": 10.133333206176758,
+          "p95": 11.433333396911621
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.97858,
+        "taf_cond_crosswind_max_kt": 0.97858,
+        "taf_cond_visibility_min_sm": 0.91667,
+        "taf_cond_ceiling_min_ft": 0.91529,
+        "metar_gust_kt": 0.8465,
+        "taf_gust_max_kt": 0.84572,
+        "metar_gust_max_kt_3h": 0.73408,
+        "taf_ceiling_min_ft": 0.59906,
+        "metar_ceiling_ft": 0.48585,
+        "metar_ceiling_min_ft_3h": 0.39426
+      }
+    },
+    {
+      "split": "test",
+      "task": "throughput",
+      "airport": "KATL",
+      "horizon_h": 12,
+      "requests": 5088,
+      "snapshot_status": {
+        "ok": 5083,
+        "partial": 5
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 123,
+        "metar_stale": 5
+      },
+      "demand_status": {
+        "ok": 5077,
+        "partial": 11
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 10,
+        "schedule_missing_neighbour_hour": 1
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 68.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 68.0,
+          "p95": 146.0
+        },
+        "taf_lead_h": {
+          "median": 13.133333206176758,
+          "p95": 14.433333396911621
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.98094,
+        "taf_cond_crosswind_max_kt": 0.98094,
+        "taf_cond_visibility_min_sm": 0.91844,
+        "taf_cond_ceiling_min_ft": 0.91706,
+        "taf_gust_max_kt": 0.84689,
+        "metar_gust_kt": 0.8465,
+        "metar_gust_max_kt_3h": 0.73408,
+        "taf_ceiling_min_ft": 0.60888,
+        "metar_ceiling_ft": 0.48526,
+        "metar_ceiling_min_ft_3h": 0.39387
+      }
+    },
+    {
+      "split": "test",
+      "task": "throughput",
+      "airport": "KDFW",
+      "horizon_h": 3,
+      "requests": 5088,
+      "snapshot_status": {
+        "ok": 5087,
+        "partial": 1
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 48,
+        "metar_stale": 1
+      },
+      "demand_status": {
+        "ok": 5085,
+        "partial": 3
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 2,
+        "schedule_missing_neighbour_hour": 1
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 67.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 91.0,
+          "p95": 215.0
+        },
+        "taf_lead_h": {
+          "median": 4.516666889190674,
+          "p95": 6.583333492279053
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99312,
+        "taf_cond_crosswind_max_kt": 0.99312,
+        "taf_cond_visibility_min_sm": 0.97445,
+        "taf_cond_ceiling_min_ft": 0.97445,
+        "taf_gust_max_kt": 0.86419,
+        "metar_gust_kt": 0.77987,
+        "metar_gust_max_kt_3h": 0.62932,
+        "taf_ceiling_min_ft": 0.55562,
+        "metar_ceiling_ft": 0.4945,
+        "metar_ceiling_min_ft_3h": 0.40861
+      }
+    },
+    {
+      "split": "test",
+      "task": "throughput",
+      "airport": "KDFW",
+      "horizon_h": 6,
+      "requests": 5088,
+      "snapshot_status": {
+        "ok": 5087,
+        "partial": 1
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 48,
+        "metar_stale": 1
+      },
+      "demand_status": {
+        "ok": 5085,
+        "partial": 3
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 2,
+        "schedule_missing_neighbour_hour": 1
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 67.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 90.5,
+          "p95": 215.0
+        },
+        "taf_lead_h": {
+          "median": 7.508333206176758,
+          "p95": 9.583333015441895
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99528,
+        "taf_cond_crosswind_max_kt": 0.99528,
+        "taf_cond_visibility_min_sm": 0.97759,
+        "taf_cond_ceiling_min_ft": 0.97583,
+        "taf_gust_max_kt": 0.8691,
+        "metar_gust_kt": 0.77968,
+        "metar_gust_max_kt_3h": 0.62893,
+        "taf_ceiling_min_ft": 0.55464,
+        "metar_ceiling_ft": 0.4945,
+        "metar_ceiling_min_ft_3h": 0.40861
+      }
+    },
+    {
+      "split": "test",
+      "task": "throughput",
+      "airport": "KDFW",
+      "horizon_h": 9,
+      "requests": 5088,
+      "snapshot_status": {
+        "ok": 5087,
+        "partial": 1
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 48,
+        "metar_stale": 1
+      },
+      "demand_status": {
+        "ok": 5085,
+        "partial": 3
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 2,
+        "schedule_missing_neighbour_hour": 1
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 67.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 90.0,
+          "p95": 215.0
+        },
+        "taf_lead_h": {
+          "median": 10.5,
+          "p95": 12.583333015441895
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99489,
+        "taf_cond_crosswind_max_kt": 0.99489,
+        "taf_cond_visibility_min_sm": 0.97858,
+        "taf_cond_ceiling_min_ft": 0.97759,
+        "taf_gust_max_kt": 0.87009,
+        "metar_gust_kt": 0.77948,
+        "metar_gust_max_kt_3h": 0.62854,
+        "taf_ceiling_min_ft": 0.55582,
+        "metar_ceiling_ft": 0.4945,
+        "metar_ceiling_min_ft_3h": 0.40861
+      }
+    },
+    {
+      "split": "test",
+      "task": "throughput",
+      "airport": "KDFW",
+      "horizon_h": 12,
+      "requests": 5088,
+      "snapshot_status": {
+        "ok": 5087,
+        "partial": 1
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 47,
+        "metar_stale": 1
+      },
+      "demand_status": {
+        "ok": 5085,
+        "partial": 3
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 2,
+        "schedule_missing_neighbour_hour": 1
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 67.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 90.0,
+          "p95": 215.0
+        },
+        "taf_lead_h": {
+          "median": 13.5,
+          "p95": 15.583333015441895
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99627,
+        "taf_cond_crosswind_max_kt": 0.99627,
+        "taf_cond_visibility_min_sm": 0.98211,
+        "taf_cond_ceiling_min_ft": 0.98133,
+        "taf_gust_max_kt": 0.87048,
+        "metar_gust_kt": 0.77948,
+        "metar_gust_max_kt_3h": 0.62854,
+        "taf_ceiling_min_ft": 0.56053,
+        "metar_ceiling_ft": 0.4945,
+        "metar_ceiling_min_ft_3h": 0.40861
+      }
+    },
+    {
+      "split": "test",
+      "task": "severe_delay",
+      "airport": "KATL",
+      "horizon_h": 3,
+      "requests": 182010,
+      "snapshot_status": {
+        "ok": 181975,
+        "partial": 35
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 4668,
+        "metar_stale": 35
+      },
+      "demand_status": {
+        "ok": 181436,
+        "partial": 574
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 518,
+        "schedule_missing_neighbour_hour": 56
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 38.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 64.0,
+          "p95": 133.0
+        },
+        "taf_lead_h": {
+          "median": 4.066666603088379,
+          "p95": 5.2166666984558105
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.96243,
+        "taf_cond_crosswind_max_kt": 0.96243,
+        "taf_cond_visibility_min_sm": 0.88181,
+        "taf_cond_ceiling_min_ft": 0.8757,
+        "metar_gust_kt": 0.83251,
+        "taf_gust_max_kt": 0.78379,
+        "metar_gust_max_kt_3h": 0.71321,
+        "taf_ceiling_min_ft": 0.58005,
+        "metar_ceiling_ft": 0.47913,
+        "metar_ceiling_min_ft_3h": 0.39345
+      }
+    },
+    {
+      "split": "test",
+      "task": "severe_delay",
+      "airport": "KATL",
+      "horizon_h": 6,
+      "requests": 182010,
+      "snapshot_status": {
+        "ok": 181938,
+        "partial": 72
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 4734,
+        "metar_stale": 72
+      },
+      "demand_status": {
+        "ok": 181436,
+        "partial": 574
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 518,
+        "schedule_missing_neighbour_hour": 56
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 38.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 69.0,
+          "p95": 138.0
+        },
+        "taf_lead_h": {
+          "median": 7.150000095367432,
+          "p95": 8.300000190734863
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.96644,
+        "taf_cond_crosswind_max_kt": 0.96644,
+        "taf_cond_visibility_min_sm": 0.88359,
+        "taf_cond_ceiling_min_ft": 0.88157,
+        "metar_gust_kt": 0.85181,
+        "taf_gust_max_kt": 0.79175,
+        "metar_gust_max_kt_3h": 0.76179,
+        "taf_ceiling_min_ft": 0.5882,
+        "metar_ceiling_ft": 0.49172,
+        "metar_ceiling_min_ft_3h": 0.40368
+      }
+    },
+    {
+      "split": "test",
+      "task": "severe_delay",
+      "airport": "KATL",
+      "horizon_h": 9,
+      "requests": 182010,
+      "snapshot_status": {
+        "ok": 181921,
+        "partial": 89
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 4281,
+        "metar_stale": 89
+      },
+      "demand_status": {
+        "ok": 181436,
+        "partial": 574
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 518,
+        "schedule_missing_neighbour_hour": 56
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 38.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 64.0,
+          "p95": 134.0
+        },
+        "taf_lead_h": {
+          "median": 10.066666603088379,
+          "p95": 11.233333587646484
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_crosswind_max_kt": 0.96861,
+        "taf_cond_gust_max_kt": 0.96861,
+        "metar_gust_kt": 0.89129,
+        "taf_cond_visibility_min_sm": 0.88117,
+        "taf_cond_ceiling_min_ft": 0.87908,
+        "metar_gust_max_kt_3h": 0.81358,
+        "taf_gust_max_kt": 0.80354,
+        "taf_ceiling_min_ft": 0.59556,
+        "metar_ceiling_ft": 0.50459,
+        "metar_ceiling_min_ft_3h": 0.40574
+      }
+    },
+    {
+      "split": "test",
+      "task": "severe_delay",
+      "airport": "KATL",
+      "horizon_h": 12,
+      "requests": 182010,
+      "snapshot_status": {
+        "ok": 181943,
+        "partial": 67
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 3829,
+        "metar_stale": 67
+      },
+      "demand_status": {
+        "ok": 181436,
+        "partial": 574
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 518,
+        "schedule_missing_neighbour_hour": 56
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 38.0,
+          "p95": 68.0
+        },
+        "taf_age_min": {
+          "median": 70.0,
+          "p95": 137.0
+        },
+        "taf_lead_h": {
+          "median": 13.166666984558105,
+          "p95": 14.283333778381348
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_crosswind_max_kt": 0.97234,
+        "taf_cond_gust_max_kt": 0.97234,
+        "metar_gust_kt": 0.9069,
+        "taf_cond_visibility_min_sm": 0.88374,
+        "taf_cond_ceiling_min_ft": 0.8813,
+        "metar_gust_max_kt_3h": 0.80914,
+        "taf_gust_max_kt": 0.80559,
+        "taf_ceiling_min_ft": 0.60371,
+        "metar_ceiling_ft": 0.50138,
+        "metar_ceiling_min_ft_3h": 0.40016
+      }
+    },
+    {
+      "split": "test",
+      "task": "severe_delay",
+      "airport": "KDFW",
+      "horizon_h": 3,
+      "requests": 185013,
+      "snapshot_status": {
+        "ok": 185000,
+        "partial": 13
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 1842,
+        "metar_stale": 13
+      },
+      "demand_status": {
+        "ok": 184838,
+        "partial": 175
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 111,
+        "schedule_missing_neighbour_hour": 64
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 37.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 86.0,
+          "p95": 197.0
+        },
+        "taf_lead_h": {
+          "median": 4.433333396911621,
+          "p95": 6.2833333015441895
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_crosswind_max_kt": 0.99069,
+        "taf_cond_gust_max_kt": 0.99069,
+        "taf_cond_visibility_min_sm": 0.97032,
+        "taf_cond_ceiling_min_ft": 0.96402,
+        "taf_gust_max_kt": 0.84129,
+        "metar_gust_kt": 0.75207,
+        "metar_gust_max_kt_3h": 0.60237,
+        "taf_ceiling_min_ft": 0.54245,
+        "metar_ceiling_ft": 0.48272,
+        "metar_ceiling_min_ft_3h": 0.3909
+      }
+    },
+    {
+      "split": "test",
+      "task": "severe_delay",
+      "airport": "KDFW",
+      "horizon_h": 6,
+      "requests": 185013,
+      "snapshot_status": {
+        "ok": 185010,
+        "partial": 3
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 1635,
+        "metar_stale": 3
+      },
+      "demand_status": {
+        "ok": 184838,
+        "partial": 175
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 111,
+        "schedule_missing_neighbour_hour": 64
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 37.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 83.0,
+          "p95": 195.0
+        },
+        "taf_lead_h": {
+          "median": 7.383333206176758,
+          "p95": 9.25
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99438,
+        "taf_cond_crosswind_max_kt": 0.99438,
+        "taf_cond_visibility_min_sm": 0.97726,
+        "taf_cond_ceiling_min_ft": 0.97017,
+        "taf_gust_max_kt": 0.84702,
+        "metar_gust_kt": 0.77699,
+        "metar_gust_max_kt_3h": 0.6508,
+        "taf_ceiling_min_ft": 0.53943,
+        "metar_ceiling_ft": 0.48119,
+        "metar_ceiling_min_ft_3h": 0.39597
+      }
+    },
+    {
+      "split": "test",
+      "task": "severe_delay",
+      "airport": "KDFW",
+      "horizon_h": 9,
+      "requests": 185013,
+      "snapshot_status": {
+        "ok": 185013
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 1387
+      },
+      "demand_status": {
+        "ok": 184838,
+        "partial": 175
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 111,
+        "schedule_missing_neighbour_hour": 64
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 37.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 86.0,
+          "p95": 195.0
+        },
+        "taf_lead_h": {
+          "median": 10.433333396911621,
+          "p95": 12.25
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_gust_max_kt": 0.99443,
+        "taf_cond_crosswind_max_kt": 0.99443,
+        "taf_cond_visibility_min_sm": 0.9797,
+        "taf_cond_ceiling_min_ft": 0.97433,
+        "taf_gust_max_kt": 0.84883,
+        "metar_gust_kt": 0.82637,
+        "metar_gust_max_kt_3h": 0.70471,
+        "taf_ceiling_min_ft": 0.54598,
+        "metar_ceiling_ft": 0.48815,
+        "metar_ceiling_min_ft_3h": 0.40449
+      }
+    },
+    {
+      "split": "test",
+      "task": "severe_delay",
+      "airport": "KDFW",
+      "horizon_h": 12,
+      "requests": 185013,
+      "snapshot_status": {
+        "ok": 185013
+      },
+      "snapshot_reasons": {
+        "metar_cor_skipped": 1437
+      },
+      "demand_status": {
+        "ok": 184838,
+        "partial": 175
+      },
+      "demand_reasons": {
+        "schedule_unresolved_anchor_hour": 111,
+        "schedule_missing_neighbour_hour": 64
+      },
+      "ages": {
+        "metar_age_min": {
+          "median": 37.0,
+          "p95": 67.0
+        },
+        "taf_age_min": {
+          "median": 83.0,
+          "p95": 194.0
+        },
+        "taf_lead_h": {
+          "median": 13.383333206176758,
+          "p95": 15.233333587646484
+        }
+      },
+      "top_null_rates": {
+        "taf_cond_crosswind_max_kt": 0.99543,
+        "taf_cond_gust_max_kt": 0.99543,
+        "taf_cond_visibility_min_sm": 0.98279,
+        "taf_cond_ceiling_min_ft": 0.97601,
+        "taf_gust_max_kt": 0.84962,
+        "metar_gust_kt": 0.83488,
+        "metar_gust_max_kt_3h": 0.69269,
+        "taf_ceiling_min_ft": 0.55997,
+        "metar_ceiling_ft": 0.49659,
+        "metar_ceiling_min_ft_3h": 0.41475
+      }
+    }
+  ]
+}
