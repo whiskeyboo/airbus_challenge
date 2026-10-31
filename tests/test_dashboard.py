@@ -446,11 +446,11 @@ def test_app_default_case_renders_and_does_not_load_outcomes(monkeypatch):
     at = AppTest.from_file(str(APP), default_timeout=60)
     at.run()
     assert not at.exception
-    assert at.title[0].value == "KDFW: next 12 hours from 2024-05-27 18:00Z"
+    assert at.title[0].value == "DFW: next 12 hours from 27 May 2024, 18:00 UTC"
     assert [h.value for h in at.header][:3] == [
-        "Known at T",
-        "Forecast for the next 12 h",
-        "Advisories",
+        "At a glance",
+        "What this means",
+        "Expected arrivals",
     ]
     assert at.code[0].value.startswith("KDFW 271653Z")
     assert any(
@@ -476,8 +476,8 @@ def test_app_case_without_predictions_says_so():
     at = AppTest.from_file(str(APP), default_timeout=60).run()
     at.button(key="case_1").click().run()  # KATL 2023-08-11 08:00Z, train split.
     assert not at.exception
-    assert at.title[0].value == "KATL: next 12 hours from 2023-08-11 08:00Z"
-    assert any("No predictions for this period" in w.value for w in at.warning)
+    assert at.title[0].value == "ATL: next 12 hours from 11 Aug 2023, 08:00 UTC"
+    assert any("No predictions are available" in w.value for w in at.warning)
     assert at.code[0].value.startswith("KATL 110652Z")
 
 
@@ -492,8 +492,13 @@ def test_replay_rejects_locked_test_before_reading_outcomes(root, monkeypatch):
 
 
 def test_default_run_prefers_the_combined_model_run():
-    assert dd.default_run_index(["baselines_dev", "lgbm_dev", "lgbm_throughput_dev"]) == 1
-    assert dd.default_run_index(["baselines_dev", "lgbm_delay_dev", "lgbm_throughput_dev"]) == 2
+    assert (
+        dd.default_run_index(["baselines_dev", "lgbm_dev", "lgbm_throughput_dev"]) == 1
+    )
+    assert (
+        dd.default_run_index(["baselines_dev", "lgbm_delay_dev", "lgbm_throughput_dev"])
+        == 2
+    )
     assert dd.default_run_index(["baselines_dev"]) == 0
 
 
@@ -510,5 +515,95 @@ def test_advisory_cards_show_worst_level_and_missing_outcomes():
     cards = {c["title"]: c for c in dd.advisory_cards(rec)}
     assert cards["Arrival throughput (AAR proxy)"]["value"] == "WATCH"
     assert cards["Severe delay (>45 min, if operated)"]["value"] == "ABSTAIN"
-    assert "no_prediction_rows" in cards["Severe delay (>45 min, if operated)"]["detail"]
+    assert (
+        "No matching predictions"
+        in cards["Severe delay (>45 min, if operated)"]["detail"]
+    )
+    assert (
+        "no_prediction_rows"
+        not in cards["Severe delay (>45 min, if operated)"]["detail"]
+    )
     assert cards["Cancellation (reported separately)"]["value"] == "NO DATA"
+
+
+def test_plain_brief_keeps_forecasts_when_delay_predictions_are_missing():
+    rec = {
+        "components": [
+            {
+                "kind": "throughput",
+                "level": "watch",
+                "horizon_h": 3,
+                "numbers": {"estimate": 35.4, "p10": 29.2, "p90": 41.6},
+            },
+            {
+                "kind": "throughput",
+                "level": "normal",
+                "horizon_h": 6,
+                "numbers": {"estimate": 0.0, "p10": None, "p90": None},
+            },
+            {
+                "kind": "severe_delay",
+                "level": "abstain",
+                "reasons": ["no_prediction_rows"],
+            },
+        ]
+    }
+    summary = dd.plain_brief(rec)
+    assert summary["arrivals"] == [
+        {"horizon_h": 3, "estimate": 35.4, "p10": 29.2, "p90": 41.6},
+        {"horizon_h": 6, "estimate": 0.0, "p10": None, "p90": None},
+    ]
+    assert "No flight-delay predictions are available for this time" in summary["delay"]
+    assert "no_prediction_rows" not in summary["delay"]
+
+
+def test_plain_brief_explains_probability_is_per_operated_flight():
+    rec = {
+        "components": [
+            {
+                "kind": "severe_delay",
+                "level": "watch",
+                "numbers": {"max_probability": 0.42, "n_scored": 7},
+            }
+        ]
+    }
+    summary = dd.plain_brief(rec)
+    assert "42.0%" in summary["delay"]
+    assert "among 7 scored flights" in summary["delay"]
+    assert "if the flight operates" in summary["delay"]
+    assert dd.run_label("lgbm_throughput_dev") == "Arrival model"
+
+
+def test_plain_brief_keeps_risk_visible_when_the_alert_is_unavailable():
+    rec = {
+        "components": [
+            {
+                "kind": "severe_delay",
+                "level": "abstain",
+                "reasons": ["no_threshold_meets_precision"],
+                "numbers": {"max_probability": 0.42, "n_scored": 7},
+            }
+        ]
+    }
+    assert "42.0%" in dd.plain_brief(rec)["delay"]
+    assert "alert is unavailable" in dd.plain_brief(rec)["delay"]
+    assert not dd.can_generate_brief(rec, [], {})
+
+
+@pytest.mark.skipif(
+    not REAL
+    or not (REPO / "artifacts/lgbm_throughput_dev/predictions.parquet").exists(),
+    reason="needs the real arrival-model development run",
+)
+def test_arrival_only_run_shows_readable_partial_summary():
+    at = AppTest.from_file(str(APP), default_timeout=60).run()
+    at.selectbox(key="run").set_value("lgbm_throughput_dev").run()
+    assert not at.exception
+    texts = [x.value for x in at.markdown] + [x.value for x in at.info]
+    assert any("In 3 hours:" in text for text in texts)
+    assert any(
+        "No flight-delay predictions are available for this time" in text
+        for text in texts
+    )
+    assert not any("Insufficient data for a full brief:" in text for text in texts)
+    assert at.button(key="brief_llm").disabled

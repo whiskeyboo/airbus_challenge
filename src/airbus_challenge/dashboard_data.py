@@ -363,6 +363,83 @@ def component_table(rec: dict) -> pd.DataFrame:
 LEVEL_ORDER = ["normal", "watch", "act"]
 
 
+def run_label(run: str) -> str:
+    labels = {
+        "lgbm_dev": "Combined arrival and flight-risk model",
+        "lgbm_throughput_dev": "Arrival model",
+        "lgbm_delay_dev": "Flight-delay model",
+        "baselines_dev": "Arrival baselines",
+        "baselines_flight_dev": "Flight-risk baselines",
+        "lgbm_throughput_v1": "Arrival model",
+        "lgbm_delay_v1": "Flight-delay model",
+        "baseline_climatology_v1": "Typical conditions",
+        "baseline_schedule_v1": "Schedule only",
+        "baseline_persistence_v1": "Recent arrivals",
+        "baseline_seasonal_persistence_v1": "Previous-week arrivals",
+    }
+    return labels.get(run, run.replace("_", " "))
+
+
+def friendly_reason(code: str) -> str:
+    reasons = {
+        "no_prediction_rows": "No matching predictions are available in this forecast set.",
+        "no_wp_d7_calibration_for_model": "This model does not have a calibrated alert setting.",
+        "no_threshold_meets_precision": "The model did not meet the required accuracy for an alert.",
+        "precision_target_not_reached": "The model did not meet the required accuracy for an alert.",
+        "no_usable_clear_weather_reference": "The usual clear-weather reference is unavailable.",
+        "estimate_missing": "There is not enough information for this prediction.",
+        "source_hour_incomplete": "A previous hour of arrival data is incomplete.",
+    }
+    return reasons.get(
+        code,
+        REASONS.get(
+            code, "Some information needed for this assessment is unavailable."
+        ),
+    )
+
+
+def plain_brief(rec: dict) -> dict:
+    arrivals = []
+    delay = "No flight-delay predictions are available in this forecast set."
+    for component in rec["components"]:
+        numbers = component.get("numbers") or {}
+        if (
+            component["kind"] == "throughput"
+            and numbers.get("estimate") is not None
+            and not pd.isna(numbers["estimate"])
+        ):
+            arrivals.append(
+                {
+                    "horizon_h": component.get("horizon_h"),
+                    "estimate": numbers["estimate"],
+                    "p10": numbers.get("p10"),
+                    "p90": numbers.get("p90"),
+                }
+            )
+        elif component["kind"] == "severe_delay":
+            reasons = component.get("reasons") or []
+            reason = (
+                friendly_reason(reasons[0])
+                if reasons
+                else "There is not enough information to assess flight-delay risk."
+            )
+            if "no_prediction_rows" in reasons:
+                reason = "No flight-delay predictions are available for this time in the selected forecast set."
+            probability = numbers.get("max_probability")
+            count = numbers.get("n_scored")
+            if (
+                probability is not None
+                and not pd.isna(probability)
+                and count is not None
+            ):
+                delay = f"The highest predicted risk among {count} scored flights is {100 * probability:.1f}%. This is the risk of a delay over 45 minutes if the flight operates."
+                if component["level"] == "abstain":
+                    delay += " An alert is unavailable. " + reason
+            else:
+                delay = reason
+    return {"arrivals": arrivals, "delay": delay}
+
+
 def default_run_index(runs: list[str]) -> int:
     """Prefer the combined model run, then any model run, then the first (baseline) run."""
     for preferred in ("lgbm_dev", "lgbm_throughput_dev"):
@@ -388,15 +465,26 @@ def advisory_cards(rec: dict) -> list[dict]:
             continue
         scored = [c["level"] for c in comps if c["level"] in LEVEL_ORDER]
         worst = max(scored, key=LEVEL_ORDER.index) if scored else "abstain"
-        reasons = sorted({r for c in comps if c["level"] == "abstain" for r in c.get("reasons") or []})
+        reasons = sorted(
+            {
+                r
+                for c in comps
+                if c["level"] == "abstain"
+                for r in c.get("reasons") or []
+            }
+        )
         nums = [c.get("numbers") or {} for c in comps]
         if kind == "severe_delay":
             p = max((n.get("max_probability") for n in nums if n.get("max_probability") is not None), default=None)  # fmt: skip
-            detail = f"highest flight probability {_pct(p)}"
+            detail = (
+                f"Highest predicted flight risk: {_pct(p)}"
+                if p is not None
+                else "No flight-delay risk is available for this selection."
+            )
         else:
-            detail = ", ".join(f"h={c.get('horizon_h')}: {c['level']}" for c in comps if c.get("horizon_h") is not None)  # fmt: skip
+            detail = " · ".join(f"{c.get('horizon_h')}h: {c['level']}" for c in comps if c.get("horizon_h") is not None)  # fmt: skip
         if reasons:
-            detail += f"; abstain: {', '.join(reasons)}"
+            detail += " " + " ".join(dict.fromkeys(friendly_reason(r) for r in reasons))
         cards.append({"title": title, "value": worst.upper(), "detail": detail or worst,
                       "help": comps[0]["message"]})  # fmt: skip
     canc = rec.get("cancellation")
@@ -405,7 +493,7 @@ def advisory_cards(rec: dict) -> list[dict]:
         "title": "Cancellation (reported separately)",
         "value": _pct(n.get("mean_probability")) if canc else "NO DATA",
         "detail": f"mean over {n.get('n_scored', 0)} flights; max {_pct(n.get('max_probability'))}; no alert rule"
-        if canc else "no cancellation model in this run",
+        if canc else "No cancellation prediction is available for this selection.",
         "help": "Average predicted cancellation probability for departures in the window.",
     })  # fmt: skip
     return cards
@@ -445,6 +533,10 @@ def brief_timestamps(t: pd.Timestamp, evidence: dict, preds: pd.DataFrame) -> di
         else None,
     }
     return {k: v for k, v in out.items() if v is not None}
+
+
+def can_generate_brief(rec: dict, drivers: list[dict], timestamps: dict) -> bool:
+    return not explain.missing(rec, drivers, timestamps)
 
 
 def make_brief(rec: dict, drivers: list[dict], timestamps: dict, use_llm: bool = False,

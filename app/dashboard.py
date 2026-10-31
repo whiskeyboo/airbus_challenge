@@ -81,142 +81,221 @@ st.set_page_config(page_title="Airport capacity and delay risk: replay", layout=
 if "airport" not in st.session_state:
     set_case(CASES[0])
 with st.sidebar:
-    st.header("Issue time T")
-    icao = st.selectbox("Airport", list(AIRPORTS), key="airport")
+    st.header("Choose a past moment")
+    icao = st.selectbox(
+        "Airport",
+        list(AIRPORTS),
+        format_func=lambda a: f"{AIRPORTS[a]['iata']} ({a})",
+        key="airport",
+    )
     day = st.date_input(
         "Date (UTC)", key="day", min_value=date(2023, 1, 1), max_value=date(2025, 7, 31)
     )
     hour = st.selectbox(
-        "Hour (UTC)", list(range(24)), key="hour", format_func=lambda h: f"{h:02d}:00Z"
+        "Time (UTC)", list(range(24)), key="hour", format_func=lambda h: f"{h:02d}:00Z"
     )
     t = pd.Timestamp(day).tz_localize("UTC") + pd.Timedelta(hours=hour)
     local = dd.local_time(ROOT, icao, t)
     st.markdown(
-        f"**T = {t:%Y-%m-%d %H:%M} UTC**  \n{local:%Y-%m-%d %H:%M %Z} at {icao}"
+        f"**{t:%d %b %Y, %H:%M UTC}**  \n{local:%I:%M %p %Z} at {AIRPORTS[icao]['iata']}"
     )
     runs = dd.list_runs(ROOT)
     run = (
-        st.selectbox("Prediction run", runs, index=dd.default_run_index(runs), key="run")
+        st.selectbox(
+            "Forecast set",
+            runs,
+            index=dd.default_run_index(runs),
+            format_func=dd.run_label,
+            key="run",
+            help="Choose a model or a simpler baseline to compare.",
+        )
         if runs
         else None
     )
     st.caption(
-        "Historical replay, not live data. Weather counts as available 10 min after "
-        "observation or issue (simulated latency)."
+        "Looking back at a past forecast. Weather report availability is simulated "
+        "with a 10-minute delay."
     )
 
-st.title(f"{icao}: next 12 hours from {t:%Y-%m-%d %H:%MZ}")
+st.title(f"{AIRPORTS[icao]['iata']}: next 12 hours from {t:%d %b %Y, %H:%M UTC}")
 st.caption(
     "Advisory information for review by a traffic management coordinator. It does not issue "
     "clearances or start traffic management initiatives."
 )
 st.warning(
-    "Development demonstration: candidate models used H1 2024 for early stopping, although "
-    "their recorded fit cutoff is 1 January 2024. Validation scores are not independent; "
-    "some degraded predictions have no validated fallback. Treat these outputs as provisional."
+    "Historical demonstration, not a live airport system. Results are provisional: "
+    "validation was used while selecting the model, and some lower-quality predictions "
+    "have not been separately validated."
 )
+with st.expander("About this demonstration"):
+    st.write(
+        "The candidate models used the first half of 2024 to choose when to stop training, "
+        "but their saved fit cutoff is 1 January 2024. Validation scores are therefore not "
+        "independent. Some degraded predictions do not have a validated fallback."
+    )
+    st.write(
+        "Weather and schedule availability are simulated for replay; this is not a live feed."
+    )
 replay_tab, cases_tab, eval_tab = st.tabs(
-    ["Replay at T", "Failure cases", "Evaluation (read-only)"]
+    ["Overview", "Explore past cases", "How accurate is it?"]
 )
 
 # Replay at T --------------------------------------------------------------------------------
 
 with replay_tab:
-    st.header("Known at T")
     ev = timed("evidence", evidence, icao, t)
     snaps = ev["snapshots"]
-    if snaps.empty:
-        st.warning(f"Insufficient data: no weather snapshot for {icao} at {fmt_t(t)}.")
+    st.header("At a glance")
+    st.caption(
+        "A summary of the selected forecast, not an instruction to airport staff."
+    )
+    rows = timed("run_rows", run_rows, run, icao, t) if run else pd.DataFrame()
+    rec = None
+    if run is None:
+        st.info(
+            f"Predictions {dd.not_generated('train')} (or `airbus_challenge.baselines`)."
+        )
+    elif rows.empty:
+        st.info(
+            "No predictions are available for this airport and time. Try a different date or forecast set."
+        )
     else:
-        first = snaps.iloc[0]
-        st.markdown(
-            f"**Weather status:** `{first.status}`: {dd.STATUS.get(first.status, '')}"
-        )
-        codes = sorted({c for rc in snaps.reason_codes for c in rc})
-        for line in dd.reason_text(codes):
-            st.markdown(f"- {line}")
-        metar_col, taf_col = st.columns(2)
-        with metar_col:
-            st.subheader("Latest METAR")
-            m = ev["metar"]
-            if m is None:
-                st.info("No METAR available at T.")
-            else:
-                st.code(m["raw_metar"], language=None)
-                st.markdown(
-                    f"Observed {fmt_t(m['observed_at_utc'])}, available {fmt_t(m['available_at_utc'])} "
-                    f"({m['availability_basis']}, 10-min latency). Age at T: "
-                    f"{fmt(first.metar_age_min, 'min')}. Wind status: **{first.metar_wind_status}**."
-                )
-            winds = dd.runway_winds(ROOT, icao, first)
-            st.markdown(
-                f"Runway-relative wind at T (runway heading {AIRPORTS[icao]['runway_heading_deg']}°, "
-                "used as given; true vs magnetic unconfirmed)"
+        models = dd.advisory_models(rows)
+        model = st.selectbox("Arrival model", models, format_func=dd.run_label, key="adv_model") if models else None  # fmt: skip
+        used = dd.advisory_rows(rows, model)
+        # The run's WP-D7 calibration.json when present, else the provisional thresholds.
+        policy = recommend.load_policy(ROOT / dd.ARTIFACTS / run)
+        rec = recommend.recommend(used, reference(), policy)
+        if rec["threshold_label"] == recommend.THRESHOLD_LABEL:
+            st.warning(
+                "This run has no calibrated alert policy. Its provisional advisory levels "
+                "are for demonstration and are not validated for operational use."
             )
-            st.dataframe(
-                winds.drop(columns=["wind_status", "note"]).round(1), hide_index=True
-            )
-            if winds.note[0]:
-                st.caption(winds.note[0])
-        with taf_col:
-            st.subheader("TAF in force at T")
-            taf = ev["taf"]
-            if taf is None:
-                st.info("Insufficient data: no TAF available at T.")
-            else:
-                b = taf["bulletin"]
-                kind = (
-                    "correction" if b["is_correction"]
-                    else "amendment" if b["is_amendment"] else "routine"
-                )  # fmt: skip
-                st.markdown(
-                    f"`{b['bulletin_id']}` ({kind}). Issued {fmt_t(b['issued_at_utc'])}, available "
-                    f"{fmt_t(b['available_at_utc'])} ({b['availability_basis']}). Age at T: "
-                    f"{fmt(first.taf_age_min, 'min')}. Valid to {fmt_t(b['bulletin_valid_to_utc'])}."
-                )
-                segs = taf["segments"].assign(
-                    valid_from=lambda d: d.valid_from_utc.map(fmt_t),
-                    valid_to=lambda d: d.valid_to_utc.map(fmt_t),
-                )
-                st.dataframe(
-                    segs[
-                        [
-                            "forecast_type",
-                            "probability",
-                            "valid_from",
-                            "valid_to",
-                            "raw_group",
-                        ]
-                    ],
-                    hide_index=True,
-                )
-        st.markdown("**TAF for each target hour** (worst case over the hour)")
-        per_hour = pd.DataFrame(
-            {
-                "target hour (UTC)": snaps.target_start_utc.map(fmt_t),
-                "lead (h)": snaps.horizon_h,
-                "visibility min (sm)": snaps.taf_visibility_min_sm,
-                "ceiling min (ft)": snaps.taf_ceiling_min_ft,
-                "crosswind max (kt)": snaps.taf_crosswind_max_kt,
-                "tailwind max hdg end (kt)": snaps.taf_tailwind_max_kt_hdg,
-                "tailwind max rec end (kt)": snaps.taf_tailwind_max_kt_rec,
-                "TS prevailing": snaps.taf_ts_prevailing,
-                "TS in TEMPO/PROB": snaps.taf_ts_conditional,
-                "PROB max": snaps.taf_prob_max,
-                "status": snaps.status,
-            }
+        st.subheader("Overall assessment")
+        level_text = {
+            "normal": "No alert was raised by the selected rules.",
+            "watch": "Some forecasts need closer attention.",
+            "act": "At least one forecast crossed an action threshold.",
+            "abstain": "There is not enough information for a complete assessment.",
+        }
+        (st.warning if rec["level"] in ("abstain", "watch", "act") else st.success)(
+            level_text.get(rec["level"], "Assessment unavailable.")
         )
-        st.dataframe(per_hour.round(1), hide_index=True)
+        cards = dd.advisory_cards(rec)
+        for col, card in zip(st.columns(len(cards)), cards):
+            value = {
+                "ABSTAIN": "Unavailable",
+                "NO DATA": "Unavailable",
+                "WATCH": "Watch",
+                "ACT": "Act",
+                "NORMAL": "Normal",
+            }.get(card["value"], card["value"])
+            title = {
+                "Arrival throughput (AAR proxy)": "Landings",
+                "Severe delay (>45 min, if operated)": "Departure delays",
+                "Cancellation (reported separately)": "Cancellations",
+            }.get(card["title"], card["title"])
+            col.metric(title, value, help=card["help"])
+            col.caption(card["detail"])
+        st.caption(
+            "Normal: no alert · Watch: keep an eye on it · Act: a rule's threshold was reached · Unavailable: not enough information."
+        )
+        with st.expander("How was this assessment made?"):
+            st.caption(
+                "Rules and thresholds are chosen from the selected forecast set. Missing inputs can make an assessment unavailable."
+            )
+            comps = dd.component_table(rec)
+            for _, component in comps[comps.level.eq("abstain")].iterrows():
+                st.markdown(
+                    f"- **{component.kind.replace('_', ' ').title()}:** {component.reasons or 'Information unavailable.'}"
+                )
+            st.dataframe(comps, hide_index=True)
+            st.markdown(f"**Policy:** `{rec['threshold_label']}`")
+            st.json(
+                {
+                    k: v
+                    for k, v in rec["thresholds"].items()
+                    if k not in ("label", "source")
+                },
+                expanded=False,
+            )
+            saved = timed("advisories", advisories, run, icao, t)
+            if saved is not None:
+                st.caption("Saved assessment for this selection")
+                st.dataframe(saved, hide_index=True)
+        if rec["cancellation"] is None:
+            st.caption("No cancellation predictions are available for this selection.")
 
-    st.header("Forecast for the next 12 h")
+    st.header("What this means")
+    if rec is None:
+        st.info("Choose a time with a forecast to see a summary.")
+    else:
+        drivers = dd.load_drivers(ROOT, run, used["prediction_id"])
+        stamps = dd.brief_timestamps(t, ev, used)
+        summary = dd.plain_brief(rec)
+        st.markdown("**Predicted arrivals**")
+        if not summary["arrivals"]:
+            st.info("Arrival predictions are unavailable for this selection.")
+        else:
+            for item in summary["arrivals"]:
+                text = f"In {item['horizon_h']} hours: **{item['estimate']:.1f} landings per hour**"
+                if pd.notna(item["p10"]) and pd.notna(item["p90"]):
+                    text += f" (model range {item['p10']:.1f}–{item['p90']:.1f})"
+                st.markdown(f"- {text}")
+            st.caption(
+                "The model range is an estimate, not a guarantee. Arrivals reflect demand as well as runway capacity."
+            )
+        st.markdown("**Flight-delay risk**")
+        st.write(summary["delay"])
+        if not drivers:
+            st.info(
+                "The factors behind these forecasts are not available for this selection."
+            )
+        else:
+            st.caption(
+                "Contributing factors are available below. They are associations, not necessarily causes."
+            )
+        with st.expander("See contributing factors and source times"):
+            if drivers:
+                st.dataframe(pd.DataFrame(drivers), hide_index=True)
+            else:
+                st.write("No per-prediction contributing factors are available.")
+            time_labels = {
+                "as_of_utc": "Forecast time",
+                "metar_available_at_utc": "Weather report available",
+                "taf_available_at_utc": "Weather forecast available",
+                "predictions_generated_at_utc": "Prediction file generated",
+            }
+            for name, value in stamps.items():
+                st.write(f"{time_labels.get(name, name)}: {fmt_t(value)}")
+        key = ("brief_llm", run, icao, str(t), model)
+        if st.button(
+            "Generate a written summary",
+            key="brief_llm",
+            disabled=not dd.can_generate_brief(rec, drivers, stamps),
+            help="Requires flight-risk predictions, contributing factors, and source times; uses a language model.",
+        ):
+            st.session_state[key] = dd.make_brief(rec, drivers, stamps, use_llm=True)
+        if key in st.session_state:
+            written = st.session_state[key]
+            if written["path"] == "llm":
+                st.write(written["text"])
+            else:
+                st.info(
+                    "A written summary is unavailable right now. The forecast and any missing information are shown above."
+                )
+
+    st.header("Expected arrivals")
+    st.caption(
+        "Compare the predicted number of landings with the schedule. Each point is a forecast for one hour, 3–12 hours ahead."
+    )
     if run is None:
         st.info("No prediction runs found in artifacts/.")
     else:
         table = timed("forecast", forecast, run, icao, t)
         if table.empty:
             st.warning(
-                f"No predictions for this period in run `{run}`. Dev baselines cover only the "
-                "validation (H1 2024) and calibration (H2 2024) splits."
+                "No predictions are available for this airport and time. Try a date in 2024 or choose a different forecast set."
             )
         else:
             fig = go.Figure()
@@ -236,11 +315,11 @@ with replay_tab:
                     }
                 fig.add_scatter(
                     x=rows.target_start_utc, y=rows.shown, mode="lines+markers",
-                    name=f"{model} ({kind})", error_y=err,
+                    name=dd.run_label(model) if kind == "model" else f"{dd.run_label(model)} (baseline)", error_y=err,
                 )  # fmt: skip
             fig.update_layout(
-                title=f"Predicted {LABEL} vs scheduled arrivals, issued at {fmt_t(t)}",
-                xaxis_title="target hour (UTC)", yaxis_title="arrivals per hour",
+                title="Expected landings compared with the schedule",
+                xaxis_title="future hour (UTC)", yaxis_title="landings per hour",
                 legend_orientation="h",
             )  # fmt: skip
             st.plotly_chart(fig, key="forecast_chart")
@@ -257,12 +336,13 @@ with replay_tab:
                     ),
                 }
             )
-            st.dataframe(
-                shown[["model_version", "kind", "horizon_h", "target hour (UTC)",
-                       f"{LABEL} (touchdowns/h)", "p10", "p90", "status", "note", "reasons",
-                       "scheduled_arrivals"]],
-                hide_index=True,
-            )  # fmt: skip
+            with st.expander("See forecast numbers and data quality"):
+                st.dataframe(
+                    shown[["model_version", "kind", "horizon_h", "target hour (UTC)",
+                           f"{LABEL} (touchdowns/h)", "p10", "p90", "status", "note", "reasons",
+                           "scheduled_arrivals"]],
+                    hide_index=True,
+                )  # fmt: skip
             st.caption(
                 "Scheduled arrivals are the retrospective BTS schedule (as flown), not a schedule "
                 "snapshot known at T. The AAR proxy reflects demand as well as capacity."
@@ -272,102 +352,101 @@ with replay_tab:
             ):
                 st.caption(line)
 
-    st.header("Advisories")
-    rows = timed("run_rows", run_rows, run, icao, t) if run else pd.DataFrame()
-    rec = None
-    if run is None:
-        st.info(
-            f"Predictions {dd.not_generated('train')} (or `airbus_challenge.baselines`)."
-        )
-    elif rows.empty:
-        st.info(
-            f"No prediction rows for {icao} at {fmt_t(t)} in run `{run}`: no advisory."
-        )
+    st.header("Weather at the time")
+    st.caption(
+        "Reports and forecasts available at the selected time; source availability is simulated."
+    )
+    if snaps.empty:
+        st.warning(f"Insufficient data: no weather snapshot for {icao} at {fmt_t(t)}.")
     else:
-        models = dd.advisory_models(rows)
-        model = st.selectbox("Arrival throughput model", models, key="adv_model") if models else None  # fmt: skip
-        used = dd.advisory_rows(rows, model)
-        # The run's WP-D7 calibration.json when present, else the provisional thresholds.
-        policy = recommend.load_policy(ROOT / dd.ARTIFACTS / run)
-        rec = recommend.recommend(used, reference(), policy)
-        if rec["threshold_label"] == recommend.THRESHOLD_LABEL:
-            st.warning(
-                "This run has no calibrated alert policy. Its provisional advisory levels "
-                "are for demonstration and are not validated for operational use."
-            )
-        st.subheader(f"Overall level: {rec['level'].upper()}")
-        (st.warning if rec["level"] in ("abstain", "watch", "act") else st.success)(
-            rec["message"]
-        )
-        cards = dd.advisory_cards(rec)
-        for col, card in zip(st.columns(len(cards)), cards):
-            col.metric(card["title"], card["value"], help=card["help"])
-            col.caption(card["detail"])
-        st.caption(
-            f"Computed by code rules in recommend.py from the saved prediction rows. Thresholds "
-            f"are `{rec['threshold_label']}`: {rec['thresholds']['source']}."
-        )
-        comps = dd.component_table(rec)
-        abstain = comps[comps.level.eq("abstain")]
-        for _, c in abstain.iterrows():
-            st.markdown(f"- **abstain** ({c.kind}): {c.reasons or 'no reason given'}")
-        st.dataframe(comps, hide_index=True)
-        st.markdown(f"**Thresholds** (`{rec['threshold_label']}`)")
-        st.json({k: v for k, v in rec["thresholds"].items() if k not in ("label", "source")},
-                expanded=False)  # fmt: skip
-        canc = rec["cancellation"]
-        st.markdown("**Cancellation** (reported separately; no alert rule; severe-delay "
-                    "probability is conditional on the flight operating)")  # fmt: skip
-        if canc is None:
-            st.info("No cancellation predictions in this run.")
-        else:
-            st.json(canc["numbers"], expanded=False)
-        if rec["ignored_target_kinds"]:
-            st.caption(
-                f"Ignored target kinds: {', '.join(rec['ignored_target_kinds'])}"
-            )
-        saved = timed("advisories", advisories, run, icao, t)
-        with st.expander("Saved advisories.parquet for this run"):
-            if saved is None:
-                st.info(dd.not_generated(f"recommend --run {run}"))
-            else:
-                st.dataframe(saved, hide_index=True)
-
-    st.header("Brief")
-    if rec is None:
-        st.info("No advisory, so no brief.")
-    else:
-        drivers = dd.load_drivers(ROOT, run, used["prediction_id"])
-        if drivers:
-            st.markdown("**Top drivers** (SHAP contributions for these predictions; "
-                        "associations, not causes)")  # fmt: skip
-            st.dataframe(pd.DataFrame(drivers), hide_index=True)
-        else:
-            st.caption(
-                f"No per-prediction SHAP drivers ({dd.DRIVERS}) in run `{run}`; global gain "
-                "importance is not a per-prediction driver, so the brief says insufficient data."
-            )
-        stamps = dd.brief_timestamps(t, ev, used)
-        key = ("brief_llm", run, icao, str(t), model)
-        if st.button("Write brief with LLM (network call)", key="brief_llm"):
-            st.session_state[key] = dd.make_brief(rec, drivers, stamps, use_llm=True)
-        b = st.session_state.get(key) or dd.make_brief(rec, drivers, stamps)
+        first = snaps.iloc[0]
         st.markdown(
-            f"Path: **{b['path']}**"
-            + (f" ({'; '.join(b['reason'])})" if b["reason"] else "")
+            f"**Weather data:** {dd.STATUS.get(first.status, 'Status unavailable.')}"
         )
-        st.write(b["text"])
-        st.caption("SHAP drivers are associations, not causes. Every number in the brief comes "
-                   "from code; the LLM only writes words and is checked against the facts.")  # fmt: skip
+        codes = sorted({c for rc in snaps.reason_codes for c in rc})
+        with st.expander("See weather reports, runway winds and forecast details"):
+            for line in dd.reason_text(codes):
+                st.markdown(f"- {line}")
+            metar_col, taf_col = st.columns(2)
+            with metar_col:
+                st.subheader("Latest METAR")
+                m = ev["metar"]
+                if m is None:
+                    st.info("No METAR available at T.")
+                else:
+                    st.code(m["raw_metar"], language=None)
+                    st.markdown(
+                        f"Observed {fmt_t(m['observed_at_utc'])}, available {fmt_t(m['available_at_utc'])} "
+                        f"({m['availability_basis']}, 10-min latency). Age at T: "
+                        f"{fmt(first.metar_age_min, 'min')}. Wind status: **{first.metar_wind_status}**."
+                    )
+                winds = dd.runway_winds(ROOT, icao, first)
+                st.markdown(
+                    f"Runway-relative wind at T (runway heading {AIRPORTS[icao]['runway_heading_deg']}°, "
+                    "used as given; true vs magnetic unconfirmed)"
+                )
+                st.dataframe(
+                    winds.drop(columns=["wind_status", "note"]).round(1),
+                    hide_index=True,
+                )
+                if winds.note[0]:
+                    st.caption(winds.note[0])
+            with taf_col:
+                st.subheader("TAF in force at T")
+                taf = ev["taf"]
+                if taf is None:
+                    st.info("Insufficient data: no TAF available at T.")
+                else:
+                    b = taf["bulletin"]
+                    kind = (
+                        "correction" if b["is_correction"]
+                        else "amendment" if b["is_amendment"] else "routine"
+                    )  # fmt: skip
+                    st.markdown(
+                        f"`{b['bulletin_id']}` ({kind}). Issued {fmt_t(b['issued_at_utc'])}, available "
+                        f"{fmt_t(b['available_at_utc'])} ({b['availability_basis']}). Age at T: "
+                        f"{fmt(first.taf_age_min, 'min')}. Valid to {fmt_t(b['bulletin_valid_to_utc'])}."
+                    )
+                    segs = taf["segments"].assign(
+                        valid_from=lambda d: d.valid_from_utc.map(fmt_t),
+                        valid_to=lambda d: d.valid_to_utc.map(fmt_t),
+                    )
+                    st.dataframe(
+                        segs[
+                            [
+                                "forecast_type",
+                                "probability",
+                                "valid_from",
+                                "valid_to",
+                                "raw_group",
+                            ]
+                        ],
+                        hide_index=True,
+                    )
+            st.markdown("**TAF for each target hour** (worst case over the hour)")
+            per_hour = pd.DataFrame(
+                {
+                    "target hour (UTC)": snaps.target_start_utc.map(fmt_t),
+                    "lead (h)": snaps.horizon_h,
+                    "visibility min (sm)": snaps.taf_visibility_min_sm,
+                    "ceiling min (ft)": snaps.taf_ceiling_min_ft,
+                    "crosswind max (kt)": snaps.taf_crosswind_max_kt,
+                    "tailwind max hdg end (kt)": snaps.taf_tailwind_max_kt_hdg,
+                    "tailwind max rec end (kt)": snaps.taf_tailwind_max_kt_rec,
+                    "TS prevailing": snaps.taf_ts_prevailing,
+                    "TS in TEMPO/PROB": snaps.taf_ts_conditional,
+                    "PROB max": snaps.taf_prob_max,
+                    "status": snaps.status,
+                }
+            )
+            st.dataframe(per_hour.round(1), hide_index=True)
 
-    with st.expander(
-        "What actually happened (hindsight: not known at T)", expanded=False
-    ):
+    with st.expander("Compare with what actually happened", expanded=False):
         st.caption(
-            "Realised outcomes, for replay review only. Never used by the forecast above."
+            "Reveal the historical outcome to compare it with the forecast. It was not known when the forecast was made."
         )
         if st.toggle(
-            "Load realised outcomes", key="show_outcomes"
+            "Show historical outcomes", key="show_outcomes"
         ) and not dd.replay_window_is_development(ROOT, t):
             st.warning(
                 "Locked 2025 outcomes are unavailable in this development replay."
@@ -395,7 +474,9 @@ with replay_tab:
 # Failure cases ------------------------------------------------------------------------------
 
 with cases_tab:
-    st.caption("Clicking a case sets the sidebar; then open the Replay tab.")
+    st.caption(
+        "Choose an example, then open Overview to explore what was known and predicted."
+    )
     for i, case in enumerate(CASES):
         st.subheader(case["title"])
         st.markdown(
