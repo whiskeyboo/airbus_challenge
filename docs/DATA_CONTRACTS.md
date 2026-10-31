@@ -131,9 +131,13 @@ Large rolling features can reference a hashed source partition and bounds if exa
 Path: `data/labels/labels.parquet`.
 Key: `(prediction_id, target_kind, label_version)`.
 
-Fields: `prediction_id`, `target_kind`, `y_true` (nullable float64), `eligible` (bool), `exclusion_reason` (nullable string), `outcome_available_at_utc` (nullable timestamp), `availability_basis`, `label_source`, `label_version`, `unit`.
+Fields: `prediction_id`, `target_kind`, `y_true` (nullable float64), `eligible` (bool), `exclusion_reason` (nullable string), `outcome_available_at_utc` (nullable timestamp), `availability_basis`, `label_source`, `label_version`, `unit`, `data_mode` (`real` or `fixture`, required; one value per table).
 
-Allowed main targets: `official_aar`, `reporting_carrier_touchdowns`, `departure_delay_gt45`, `cancellation`. Binary outcomes must be exactly 0 or 1. Labels are outcomes, never features.
+`exclusion_reason` is null exactly when `eligible` is true. Otherwise it is one of `cancelled`, `coverage_incomplete`, `missing_outcome`, `quarantined`.
+
+Every prediction request in scope has a label row for each target it is scored on, including excluded ones, so denominators stay visible.
+
+Allowed main targets: `official_aar`, `reporting_carrier_touchdowns`, `throughput_over_clear_weather_p95`, `departure_delay_gt45`, `cancellation`. Binary outcomes must be exactly 0 or 1. Labels are outcomes, never features.
 
 ## 8. Predictions and serving
 

@@ -21,7 +21,7 @@ If final-test findings motivate further model development, call them exploratory
 
 ## 2. Baselines and ablations
 
-Airport baselines: training climatology by airport/local hour/month with a documented sparse-cell fallback; persistence using the latest eligible observation/operational target; seasonal persistence; schedule-only regression for throughput.
+Airport baselines: training climatology by airport/local hour/weekday with a documented sparse-cell fallback; persistence using the latest eligible observation/operational target; seasonal persistence; schedule-only regression for throughput.
 
 Do not present official-AAR persistence if no historically available AAR feed exists. Distinguish a retrospective oracle benchmark from an implementable baseline. Baselines and candidate models share feature availability assumptions and evaluation rows.
 
