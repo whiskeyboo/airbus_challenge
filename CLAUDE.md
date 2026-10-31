@@ -2,7 +2,7 @@
 
 Hackathon: Autonomous SG 2026 (AI & Aerospace track). Forecast hourly arrival throughput (AAR proxy) and severe departure-delay risk (>45 min) 3–12 h ahead for KATL and KDFW.
 
-Brief and rubric: `docs/challenge5.md`. Who builds what: `docs/WORK_PLAN.md`. Detailed reference specs in `docs/` (PROJECT_SPEC, TEMPORAL_RULES, DATA_CONTRACTS, EVALUATION_PLAN, SOURCES, DECISIONS). If they conflict with this file, this file wins.
+Brief and rubric: `docs/challenge5.md`. Who builds what: `docs/WORK_PLAN.md`. Phase tasks, dependencies and delivery gates: `docs/PHASE_PLAN.md`. Detailed reference specs in `docs/` (PROJECT_SPEC, TEMPORAL_RULES, DATA_CONTRACTS, EVALUATION_PLAN, SOURCES, DECISIONS). If they conflict with this file, this file wins.
 Splits, horizons and targets: `configs/experiment.yaml`. Airports, headings, timezones, weather stations: `configs/airports.yaml`.
 
 ## Data sources
@@ -29,7 +29,7 @@ Judges ask: "Where does this fail, and how would your user know?" Working end-to
 5. **AAR is a proxy.** No true AAR exists. Target = BTS arrivals (wheels-on) per UTC hour, plus ratio to a clear-weather ceiling (95th pct for that airport-hour in benign weather as defined in `configs/experiment.yaml`, fitted on train only). Label it "arrival throughput (AAR proxy)" everywhere; it reflects demand as well as capacity.
 6. **Severe delay** = departure delay strictly > 45 min (45 is negative), among operated flights only. Cancelled flights are excluded, not negatives; report cancellation rate alongside. The probability is conditional on the flight operating.
 7. **Time-based split only.** Train 2023, validation H1 2024, calibration H2 2024, test 2025 (see `configs/experiment.yaml`). No shuffling. Nothing (scalers, thresholds, calibration, tuning) is fitted on test. Also a leave-one-airport-out test.
-8. **Baselines first.** Persistence (last complete hour before T, so the hour starting at target − h − 1; marked as a simulated feed because BTS publishes months later) and climatology (airport × hour × weekday, train only). Every model metric is reported next to both.
+8. **Baselines first, by task.** Throughput uses persistence (the last complete hour before T, starting at target − h − 1; marked as a simulated feed), train-only climatology, seasonal persistence and schedule-only comparators. Severe delay uses a smoothed train-only conditional-rate baseline and logistic regression; cancellation has a separate baseline. Compare every model with the required baselines for its own target on the same declared cohorts and scoring rows (`docs/EVALUATION_PLAN.md`).
 9. **LLM / non-LLM split.** Numbers, thresholds and recommendations come from code (rules in `recommend.py`). The LLM in `explain.py` only writes a short brief from given prediction + SHAP drivers + input timestamps, cites them, and says "insufficient data" when inputs are missing. It never computes. SHAP drivers are associations, not causes.
 
 ## Pipeline modules

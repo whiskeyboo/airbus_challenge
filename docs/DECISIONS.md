@@ -59,6 +59,22 @@ Basis: `Autonomous SG 2026_Airbus Track.pdf`, Challenge 5, pages 5-6. These are 
 
 The agents must not invent organiser answers. The humans may send these questions; coding agents must not send external messages without explicit authorisation.
 
+## Pending delivery decisions
+
+The lead-requested [phased plan](PHASE_PLAN.md#2-lead-decisions-and-dependencies) names WP-D1–WP-D7 for coordination. These are **pending**, not newly accepted domain defaults. Record the selected policy and evidence in this register before dependent real fitting or final release:
+
+| Plan ID | Decision needed | Dependency |
+|---|---|---|
+| WP-D1 | Historical label-release/unknown-availability simulation and fit-cutoff enforcement, including label-derived references | Real model and baseline/reference fitting |
+| WP-D2 | Approve or revise the proposed ±2 min timestamp reconstruction tolerance | Outcome snapshot used for real fitting and final release |
+| WP-D3 | Exact CSV/LOAO cohort membership, fitting populations and manifest semantics | Additional request/label cohorts |
+| WP-D4 | Capacity-ratio label target and approved missing-reference detail mappings | Ratio labels and downstream comparators |
+| WP-D5 | Timestamped simulated operational-feed latency, coverage and freshness policy | Operations-context features |
+| WP-D6 | Strict zero-shot transfer comparator and treatment of held-out-airport normalizers | LOAO comparison |
+| WP-D7 | Calibration/threshold assessment allocation, alert/episode policy and fallback validation criteria | Frozen calibrators, recommendations and alert metrics |
+
+P10 and P12 remain accepted. The planning PR does not reopen those decisions, lift an audit hold, approve model scores, or release the 2025 locked assessment.
+
 ## Decision entry template
 
 ```text
