@@ -33,7 +33,7 @@ Judges ask: "Where does this fail, and how would your user know?" Working end-to
 9. **LLM / non-LLM split.** Numbers, thresholds and recommendations come from code (rules in `recommend.py`). The LLM in `explain.py` only writes a short brief from given prediction + SHAP drivers + input timestamps, cites them, and says "insufficient data" when inputs are missing. It never computes. SHAP drivers are associations, not causes.
 
 ## Pipeline modules
-download.py → clean.py → requests.py → targets.py → iem.py → features.py → baselines.py → train.py → evaluate.py → recommend.py → explain.py → app/dashboard.py
+download.py → clean.py → requests.py → targets.py → iem.py → features.py + demand.py → baselines.py → train.py → evaluate.py → recommend.py → explain.py → app/dashboard.py
 - Intermediate data as parquet in `data/interim/`, `data/processed/` (gitignored). Every data-producing module runs as `uv run python -m airbus_challenge.<module>`.
 - `evaluate.py` writes `reports/metrics.json` and figures: RMSE/MAE for the AAR proxy per horizon (3/6/9/12) and airport vs baselines; PR-AUC, recall@precision, Brier and reliability for delay >45, with prevalence and denominators; 3 worst misses with explanation.
 - Run the `leakage-auditor` subagent after changes to features, training or evaluation.
