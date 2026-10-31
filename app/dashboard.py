@@ -11,6 +11,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from airbus_challenge import dashboard_data as dd
+from airbus_challenge import recommend
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES = dd.load_cases(ROOT / "app/cases.yaml")
@@ -41,6 +42,16 @@ def forecast(run: str, icao: str, t: pd.Timestamp) -> pd.DataFrame:
 @st.cache_data(show_spinner=False)
 def advisories(run: str, icao: str, t: pd.Timestamp):
     return dd.load_advisories(ROOT, run, icao, t)
+
+
+@st.cache_data(show_spinner=False)
+def run_rows(run: str, icao: str, t: pd.Timestamp) -> pd.DataFrame:
+    return dd.load_run_rows(ROOT, run, icao, t)
+
+
+@st.cache_data(show_spinner=False)
+def reference():
+    return dd.load_reference(ROOT)
 
 
 @st.cache_data(show_spinner=False)
@@ -253,15 +264,66 @@ with replay_tab:
                 st.caption(line)
 
     st.header("Advisories")
-    adv = timed("advisories", advisories, run, icao, t) if run else None
-    if adv is None:
-        st.info(
-            "Advisories not available (recommend.py has not written advisories for this run)."
-        )
-    elif adv.empty:
-        st.info("No advisories for this airport and issue time.")
+    rows = timed("run_rows", run_rows, run, icao, t) if run else pd.DataFrame()
+    rec = None
+    if run is None:
+        st.info(f"Predictions {dd.not_generated('train')} (or `airbus_challenge.baselines`).")
+    elif rows.empty:
+        st.info(f"No prediction rows for {icao} at {fmt_t(t)} in run `{run}`: no advisory.")
     else:
-        st.dataframe(adv, hide_index=True)
+        models = dd.advisory_models(rows)
+        model = st.selectbox("Throughput model for the advisory", models, key="adv_model") if models else None  # fmt: skip
+        used = dd.advisory_rows(rows, model)
+        rec = recommend.recommend(used, reference())
+        st.subheader(f"Level: {rec['level'].upper()}")
+        (st.warning if rec["level"] in ("abstain", "watch", "act") else st.success)(rec["message"])
+        st.caption(
+            f"Computed by code rules in recommend.py from the saved prediction rows. Thresholds "
+            f"are `{rec['threshold_label']}`: {rec['thresholds']['source']}."
+        )
+        comps = dd.component_table(rec)
+        abstain = comps[comps.level.eq("abstain")]
+        for _, c in abstain.iterrows():
+            st.markdown(f"- **abstain** ({c.kind}): {c.reasons or 'no reason given'}")
+        st.dataframe(comps, hide_index=True)
+        st.markdown(f"**Thresholds** (`{rec['threshold_label']}`)")
+        st.json({k: v for k, v in rec["thresholds"].items() if k not in ("label", "source")},
+                expanded=False)  # fmt: skip
+        canc = rec["cancellation"]
+        st.markdown("**Cancellation** (reported separately; no alert rule; severe-delay "
+                    "probability is conditional on the flight operating)")  # fmt: skip
+        if canc is None:
+            st.info("No cancellation predictions in this run.")
+        else:
+            st.json(canc["numbers"], expanded=False)
+        if rec["ignored_target_kinds"]:
+            st.caption(f"Ignored target kinds: {', '.join(rec['ignored_target_kinds'])}")
+        saved = timed("advisories", advisories, run, icao, t)
+        with st.expander("Saved advisories.parquet for this run"):
+            if saved is None:
+                st.info(dd.not_generated(f"recommend --run {run}"))
+            else:
+                st.dataframe(saved, hide_index=True)
+
+    st.header("Brief")
+    if rec is None:
+        st.info("No advisory, so no brief.")
+    else:
+        drivers = dd.load_drivers(ROOT, run, used["prediction_id"])
+        if not drivers:
+            st.caption(
+                f"No per-prediction SHAP drivers ({dd.DRIVERS}) in run `{run}`; global gain "
+                "importance is not a per-prediction driver, so the brief says insufficient data."
+            )
+        stamps = dd.brief_timestamps(t, ev, used)
+        key = ("brief_llm", run, icao, str(t), model)
+        if st.button("Write brief with LLM (network call)", key="brief_llm"):
+            st.session_state[key] = dd.make_brief(rec, drivers, stamps, use_llm=True)
+        b = st.session_state.get(key) or dd.make_brief(rec, drivers, stamps)
+        st.markdown(f"Path: **{b['path']}**" + (f" ({'; '.join(b['reason'])})" if b["reason"] else ""))
+        st.write(b["text"])
+        st.caption("SHAP drivers are associations, not causes. Every number in the brief comes "
+                   "from code; the LLM only writes words and is checked against the facts.")  # fmt: skip
 
     with st.expander(
         "What actually happened (hindsight: not known at T)", expanded=False
@@ -299,6 +361,38 @@ with cases_tab:
             f"{case['airport']}, T = {fmt_t(pd.Timestamp(case['t']))}. {case['description']}"
         )
         st.button("Open this case", key=f"case_{i}", on_click=set_case, args=(case,))
+
+    st.header("Worst misses (failures.py report)")
+    fail_files = dd.list_failure_files(ROOT)
+    if not fail_files:
+        st.info(f"Failure cases {dd.not_generated('failures --metrics reports/metrics_dev.json')}")
+    else:
+        fpath = st.selectbox("Failure-case file", fail_files,
+                             format_func=lambda p: str(p.relative_to(ROOT)))  # fmt: skip
+        report = dd.load_failure_cases(fpath)
+        st.caption(
+            f"Run `{report.get('run_id')}`, rules `{report.get('rules_version')}`, scope "
+            f"**{report.get('scope')}**, data mode `{report.get('data_mode')}`. Read from file; "
+            f"nothing is recomputed. {report.get('hindsight_weather', '')}"
+        )
+        for i, case in enumerate(report.get("cases", [])):
+            v = dd.failure_case_view(case)
+            s = v["summary"]
+            with st.expander(f"{s['airport']} h={s['horizon_h']} {s['target']}: predicted "
+                             f"{s['estimate']} vs outcome {s['outcome']} (error {s['error']})"):  # fmt: skip
+                st.dataframe(pd.DataFrame([s]), hide_index=True)
+                possible = {True: "yes", False: "no", None: "unknown"}[v["advisory_possible"]]
+                st.markdown(f"**Advisory possible at T:** {possible}: {v['advisory_reason']}")
+                st.markdown("**Limitations**")
+                for line in v["limitations"] or ["none flagged"]:
+                    st.markdown(f"- {line}")
+                st.markdown(f"**Sources known at issue time** (explanation status "
+                            f"`{v['explanation_status']}`); ages in minutes at T: "
+                            f"{v['source_ages_min'] or 'insufficient data'}")  # fmt: skip
+                if v["sources"].empty:
+                    st.info("Insufficient data: no source records at T.")
+                else:
+                    st.dataframe(v["sources"], hide_index=True, key=f"fail_src_{i}")
 
 # Evaluation ---------------------------------------------------------------------------------
 
