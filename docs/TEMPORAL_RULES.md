@@ -80,5 +80,6 @@ Preserve true/magnetic reference metadata. The brief's numerical headings remain
 8. 45-minute departure delay is negative, 46 is positive, cancellation is not a negative.
 9. Changing final outcomes does not change feature snapshots.
 10. Offline and served feature construction return the same snapshot on a pinned request.
+11. Persistence for target hour s at horizon h uses the hour starting at s - h - 1, never the unfinished hour starting at s - h.
 
 For each test retain a compact fixture and meaningful expected behaviour. Do not merely assert the implementation returns its own intermediate value.

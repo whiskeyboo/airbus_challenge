@@ -6,7 +6,7 @@ This is the authoritative register for decisions that change scientific meaning 
 
 | ID | Requirement | Basis |
 | --- | --- | --- |
-| R01 | Single-agent workflow governed by `CLAUDE.md`; three-agent plan removed (see commit 066be0d) | User decision, 2026-10-31 |
+| R01 | Three parallel agents under `CLAUDE.md`, coordinated by `docs/WORK_PLAN.md`; replaces the single-agent rule from commit 066be0d | User decision, 2026-10-31 |
 | R02 | Ample time; prioritise a comprehensive, rigorous project | User instruction |
 | R03 | ATL and DFW; headings 80 and 180 degrees | Challenge 5 brief, pages 5-6 |
 | R04 | Forecast 3-12 hours ahead; use 3/6/9/12 as planned horizons | Brief plus reviewed plan |
@@ -26,6 +26,9 @@ This is the authoritative register for decisions that change scientific meaning 
 | P06 | Separate conditional severe-delay and cancellation models | Lead/B | Preserve probability semantics |
 | P07 | Forecast updates hourly; flight lead times anchored to scheduled departure | Lead | Record cohort/version policy |
 | P08 | Supplemental data work starts with source documentation and small access tests | Lead/A | Confirm competition permission before incorporating into scored results |
+| P09 | Persistence uses the last complete hour before T (the hour starting at T - 1h) and is marked as a simulated feed, because BTS publishes months later. Climatology and schedule-only baselines are reported alongside | Integrator | Proposed 2026-10-31 |
+| P10 | Benign hours for the clear-weather ceiling: ceiling at least 3,000 ft or none, visibility at least 5 sm, no weather codes (`configs/experiment.yaml`) | Integrator | Proposed 2026-10-31; settle before the ceiling is fitted, on train only |
+| P11 | Airport timezones come from `airportsdata`, with an explicit override for airports it lacks (PBI so far) | Integrator | Proposed 2026-10-31; check coverage on all BTS months |
 
 ## Resolved from the brief (team decisions, 2026-10-31)
 
@@ -45,6 +48,9 @@ Basis: `Autonomous SG 2026_Airbus Track.pdf`, Challenge 5, pages 5-6. These are 
 | O05 | Which repository, agent tools, runtime and hosting environment will be used? | Determines setup and deployment | Prepare portable interfaces; no external deployment |
 | O06 | What historical schedule/status knowledge can be evidenced? | Prevents availability overclaims | Declare retrospective simulation and exclude unsupported features |
 | O07 | Is sufficient AAR/TAF/flight coverage available for proposed partitions? | Determines defensible evaluation window | Coverage audit only; do not choose periods based on test skill |
+| O08 | Is the severe-delay model trained on all BTS flights or only the provided CSV sample? | `CLAUDE.md` names the CSV for delay labels, but it holds about 1% of hub departures | Keep an `in_provided_csv` flag so either population can be used |
+| O09 | Does the test window stop at July 2025 or cover all of 2025? | `configs/experiment.yaml` and `docs/EVALUATION_PLAN.md` differ | Follow the config; freeze before any test access |
+| O10 | Which Drive folder should `.env` use? | The current ID differs from the folder printed in the brief | Keep the current ID; the CSV is already on disk |
 
 The agents must not invent organiser answers. The humans may send these questions; coding agents must not send external messages without explicit authorisation.
 

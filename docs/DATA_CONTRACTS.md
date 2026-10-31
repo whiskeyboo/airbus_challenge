@@ -112,7 +112,7 @@ Generate a complete UTC hour grid, not just hours with records. Use zero only wh
 
 ## 6. Prediction requests and feature snapshots
 
-`prediction_requests` key: `prediction_id`, one task-specific request per airport/flight, target, horizon and schedule definition.
+`prediction_requests` key: `prediction_id`, one task-specific request per airport/flight, target, horizon and schedule definition. `prediction_id` is the SHA-256 of `task|airport_icao|flight_id|target_start_utc|horizon_h|cohort_version`, with an empty string for a null `flight_id`. Only `requests.py` builds it, from schedule fields and never from outcome columns.
 
 Required columns:
 `prediction_id`, `task`, `airport_icao`, `flight_id?`, `as_of_utc`, `target_start_utc`, `target_end_utc`, `horizon_h`, `schedule_snapshot_id?`, `cohort_version`, `data_mode`.

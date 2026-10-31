@@ -18,6 +18,7 @@ Pipeline code is not written yet. See `docs/challenge5.md` for the brief.
 ## Docs
 
 - `docs/challenge5.md`: brief and rubric.
+- `docs/WORK_PLAN.md`: who builds what, and how the three agents work together.
 - `docs/PROJECT_SPEC.md`, `TEMPORAL_RULES.md`, `DATA_CONTRACTS.md`, `EVALUATION_PLAN.md`: target definitions, leakage rules, schemas, evaluation protocol.
 - `docs/DECISIONS.md`: open questions for organisers. `docs/SOURCES.md`: data sources and CSV audit.
 - `configs/airports.yaml`: headings, timezones, weather stations. `configs/experiment.yaml`: splits, horizons and targets.
