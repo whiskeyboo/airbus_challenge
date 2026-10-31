@@ -596,6 +596,26 @@ def test_requests_and_targets_end_to_end_fixture(tmp_path, monkeypatch, all_coho
     assert not {"scheduled_arrivals", "throughput_over_clear_weather_p95"} & set(
         feed.columns
     )
+    training_path = targets.build_training_labels(
+        requests.OUTPUT, targets.LABELS, output_dir=tmp_path / "training"
+    )
+    training = pd.read_parquet(training_path)
+    training_manifest = json.loads(
+        training_path.with_suffix(".manifest.json").read_text()
+    )
+    assert training.outcome_available_at_utc.le(training.fit_cutoff_utc).all()
+    assert training.eligible.all()
+    assert not training.target_start_utc.ge(pd.Timestamp("2023-01-16T00:00Z")).any()
+    assert training_manifest["source_labels_sha256"] == sha256(targets.LABELS)
+    assert training_manifest["rows"] == len(training)
+    assert training_manifest["data_mode"] == "fixture"
+    with pytest.raises(ValueError, match="Capacity reference was fitted after"):
+        targets.build_training_labels(
+            requests.OUTPUT,
+            targets.LABELS,
+            fit_cutoff="2023-01-15T18:00Z",
+            output_dir=tmp_path / "early-training",
+        )
     assert set(hourly.data_mode) == {"fixture"}
     assert set(labels.data_mode) == {"fixture"}
     assert not pq.read_schema(targets.HOURLY).field("data_mode").nullable
@@ -1512,3 +1532,117 @@ def test_operational_feed_partial_and_missing_counts_stay_null():
         operational_feed(hourly, -1)
     with pytest.raises(ValueError, match="Duplicate airport-hour"):
         operational_feed(pd.concat([hourly, hourly]), 10)
+
+
+@pytest.mark.parametrize(
+    "cohort",
+    ["retrospective_schedule_v1", "csv_only_v1", "loao_KATL_v1", "loao_KDFW_v1"],
+)
+def test_training_selection_enforces_cohort_airports_targets_and_release(cohort):
+    from airbus_challenge.requests import cohort_definitions, flight_requests
+    from airbus_challenge.targets import label_rows, select_training_labels
+
+    df = outcome_fixture(
+        [
+            row(),
+            row(Flight_Number_Reporting_Airline="124", Cancelled="1"),
+            row(Flight_Number_Reporting_Airline="125", Origin="DFW", Dest="ATL"),
+            row(Flight_Number_Reporting_Airline="126", FlightDate="2024-01-01"),
+        ]
+    )
+    df["in_provided_csv"] = True
+    definitions = cohort_definitions(list(CONFIG["airports"]))
+    req = flight_requests(
+        df,
+        list(CONFIG["airports"]),
+        [3, 6],
+        pd.Timestamp("2023-01-01T00:00Z"),
+        pd.Timestamp("2024-01-02T00:00Z"),
+        "fixture",
+        cohort,
+    )
+    labels = label_rows(
+        req,
+        df[["flight_id", "dep_delay_min", "cancelled", *TIMES]],
+        pd.DataFrame(),
+        data_mode="fixture",
+    )
+    # Exact cutoff is inclusive; a later release cannot enter fitting.
+    departed = labels.target_kind.eq("departure_delay_gt45") & labels.eligible
+    labels.loc[departed, "outcome_available_at_utc"] = pd.Timestamp("2024-01-01T00:00Z")
+    late_id = req.loc[
+        req.horizon_h.eq(6) & req.flight_id.eq(df.flight_id.iloc[0]), "prediction_id"
+    ].iloc[0]
+    labels.loc[
+        labels.prediction_id.eq(late_id) & departed, "outcome_available_at_utc"
+    ] += pd.Timedelta(seconds=1)
+    experiment = {
+        "splits": {"train": {"start": "2023-01-01", "end": "2024-01-01"}},
+        "targets": {"capacity_ratio": "throughput_over_clear_weather_p95"},
+    }
+    selected = select_training_labels(
+        req, labels, cohort, definitions[cohort], experiment, "2024-01-01T00:00Z"
+    )
+    assert set(selected.airport_icao) <= set(definitions[cohort]["train_airports"])
+    assert selected.target_start_utc.lt(pd.Timestamp("2024-01-01T00:00Z")).all()
+    assert selected.outcome_available_at_utc.le(selected.fit_cutoff_utc).all()
+    assert selected.eligible.all()
+    assert not (
+        selected.prediction_id.eq(late_id)
+        & selected.target_kind.eq("departure_delay_gt45")
+    ).any()
+    cancelled_ids = req.loc[req.flight_id.eq(df.flight_id.iloc[1]), "prediction_id"]
+    assert not (
+        selected.prediction_id.isin(cancelled_ids)
+        & selected.target_kind.eq("departure_delay_gt45")
+    ).any()
+    if "KATL" in definitions[cohort]["train_airports"]:
+        assert (
+            selected.prediction_id.isin(cancelled_ids)
+            & selected.target_kind.eq("cancellation")
+        ).sum() == 2
+    with pytest.raises(ValueError, match="timezone"):
+        select_training_labels(
+            req, labels, cohort, definitions[cohort], experiment, "2024-01-01"
+        )
+
+
+def test_training_selection_rejects_unknown_availability_and_holdout_ratio():
+    from airbus_challenge.requests import cohort_definitions
+    from airbus_challenge.targets import select_training_labels
+
+    req = pd.DataFrame(
+        {
+            "prediction_id": ["p"],
+            "cohort_version": ["loao_KATL_v1"],
+            "airport_icao": ["KDFW"],
+            "task": ["throughput"],
+            "target_start_utc": [pd.Timestamp("2023-01-01T00:00Z")],
+            "data_mode": ["fixture"],
+        }
+    )
+    labels = pd.DataFrame(
+        {
+            "prediction_id": ["p"],
+            "target_kind": ["reporting_carrier_touchdowns"],
+            "eligible": [True],
+            "y_true": [1],
+            "outcome_available_at_utc": [pd.Timestamp("2023-01-01T01:10Z")],
+            "availability_basis": ["unknown"],
+        }
+    )
+    definition = cohort_definitions(list(CONFIG["airports"]))["loao_KATL_v1"]
+    experiment = {
+        "splits": {"train": {"start": "2023-01-01", "end": "2024-01-01"}},
+        "targets": {"capacity_ratio": "throughput_over_clear_weather_p95"},
+    }
+    with pytest.raises(ValueError, match="availability basis"):
+        select_training_labels(
+            req, labels, "loao_KATL_v1", definition, experiment, "2024-01-01T00:00Z"
+        )
+    labels["availability_basis"] = "simulated"
+    labels["target_kind"] = "throughput_over_clear_weather_p95"
+    with pytest.raises(ValueError, match="forbidden"):
+        select_training_labels(
+            req, labels, "loao_KATL_v1", definition, experiment, "2024-01-01T00:00Z"
+        )
