@@ -28,3 +28,12 @@ clear_weather:
 
 # Resolved from the brief: see docs/DECISIONS.md (O01-O04).
 supplemental_data_permission: in_scope_per_brief
+
+# Operational-replay simulation selected for Agent 1 delivery under lead direction.
+# This does not represent historical BTS publication timing.
+label_availability:
+  version: simulated-outcomes/1
+  basis: simulated
+  hourly_latency_min: 10
+  departure_latency_min: 10
+  cancellation_latency_h: 24

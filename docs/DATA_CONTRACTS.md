@@ -183,10 +183,23 @@ Every prediction request in scope has a label row for each target it is scored o
 
 Allowed main targets: `official_aar`, `reporting_carrier_touchdowns`, `throughput_over_clear_weather_p95`, `departure_delay_gt45`, `cancellation`. Binary outcomes must be exactly 0 or 1. Labels are outcomes, never features.
 
-WP-D4 was accepted by the project lead on 2026-10-31. Label version/schema 0.3.0 adds ratio rows with the same prediction ID as the primary raw-throughput request. Both `exclusion_reason` and `exclusion_detail` remain null iff eligible. Preserve the underlying P12 exclusion when throughput is ineligible. A missing or nonpositive reference with otherwise eligible throughput produces a null ratio with the approved details above. Unknown producer details remain hard errors. A table contains one label version and one non-null `data_mode`.
+WP-D4 was accepted by the project lead on 2026-10-31. Label version/schema 0.4.0 adds ratio rows and the simulated availability policy below with the same prediction ID as the primary raw-throughput request. Both `exclusion_reason` and `exclusion_detail` remain null iff eligible. Preserve the underlying P12 exclusion when throughput is ineligible. A missing or nonpositive reference with otherwise eligible throughput produces a null ratio with the approved details above. Unknown producer details remain hard errors. A table contains one label version and one non-null `data_mode`.
 
-Expanded cohorts/labels are first generated in a candidate directory using `requests --cohorts all --output <candidate>/prediction_requests.parquet` and `targets --requests <candidate>/prediction_requests.parquet --output-dir <candidate> --reuse-hourly`. The latter reuses the verified frozen P10 reference and records its input hash. Existing working requests/labels/features are not overwritten during this staging step. Agent 2 must regenerate matching snapshots and lineage before the lead publishes the bundle. WP-D1 (label release), WP-D2 (tolerance approval) and experiment-specific model readiness remain separate gates; constructing labels is not permission to fit or score a model.
+Expanded cohorts/labels are first generated in a candidate directory using `requests --cohorts all --output <candidate>/prediction_requests.parquet` and `targets --requests <candidate>/prediction_requests.parquet --output-dir <candidate> --reuse-hourly`. The latter reuses verified hourly counts and records their input hash; it reuses the P10 reference when policy versions match, otherwise updates it from eligible training hours under the selected policy. Existing working requests/labels/features are not overwritten during this staging step. Agent 2 must regenerate matching snapshots and lineage before the lead publishes the bundle. WP-D1 (label release), WP-D2 (tolerance approval) and experiment-specific model readiness remain separate gates; constructing labels is not permission to fit or score a model.
 
+
+### Simulated label availability (WP-D1)
+
+`simulated-outcomes/1` is an operational-replay assumption selected under the lead's delegated instruction to complete Agent 1. It does **not** claim to reconstruct historical BTS publication or status-message send times. Parameters are in `configs/experiment.yaml` under `label_availability`.
+
+- Throughput and ratio labels: UTC target hour end plus 10 minutes.
+- Severe-delay labels: scheduled departure plus signed `dep_delay_min`, plus 10 minutes.
+- Cancellation labels: the latest resolved scheduled departure/arrival or actual movement time (including the duration-derived departure), plus 24 hours.
+- Valid labels carry `availability_basis = simulated` and a UTC availability timestamp. Ineligible labels retain their exclusion and a null availability timestamp.
+- A model/baseline fits only eligible labels with `outcome_available_at_utc <= fit_cutoff_utc`. Checking the target date alone is insufficient.
+- P10 reference version `p10-capacity/2` applies the same hourly availability condition at the training cutoff. Cached counts can be reused, but an older reference is refitted when its policy version/parameters differ. Labels and normalization therefore use one declared time assumption.
+
+The existing flight archive was built with the same ±2-minute numeric rule before WP-D2 selection. Its original manifest's proposed-status wording is historical; no timestamp values are changed by accepting the existing tolerance. New cleaner manifests and candidate metadata carry the selected decision.
 
 ## 8. Predictions and serving
 

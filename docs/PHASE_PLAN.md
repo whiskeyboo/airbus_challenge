@@ -29,12 +29,12 @@ The critical path is agreed availability/cohort contracts → joined snapshots a
 
 ## 2. Lead decisions and dependencies
 
-P10, P12, WP-D3 and WP-D4 are accepted in [DECISIONS.md](DECISIONS.md). Do not reopen them as unapproved prerequisites. The table distinguishes accepted interfaces from the remaining decisions required before dependent work is released; planning an option does not accept it.
+P10, P12, WP-D3 and WP-D4 are accepted; WP-D1/WP-D2 now have selected implementation policies in [DECISIONS.md](DECISIONS.md). Do not reopen them as unapproved prerequisites. The table distinguishes accepted interfaces from the remaining decisions required before dependent work is released; planning an option does not accept it.
 
 | Plan decision | What must be fixed | Blocks | Safe work before approval |
 |---|---|---|---|
-| WP-D1: label release | Timestamp/latency rule for when archived outcomes are assumed known; how unknown availability is handled; model-fit cutoff enforcement | Real model and label-derived baseline/reference fitting | Fixture implementation, hashes/joins, schedule-only audits |
-| WP-D2: clock tolerance | Approve or revise the proposed ±2 min duration/clock tolerance and version any change | Outcome snapshot used for real fitting and final release | Existing quarantine/coverage reporting and fixtures |
+| WP-D1: label release | Selected `simulated-outcomes/1`; see DATA_CONTRACTS §7 and DECISIONS | Consumers must enforce availability against their declared fit cutoff | Agent 1 emits explicit simulated times; empirical publication remains unknown |
+| WP-D2: clock tolerance | Selected existing ±2 min rule under lead-directed completion | Keep the unchanged reconstruction rule and versioned decision provenance | No raw reconstruction needed solely for status wording |
 | WP-D3: cohort meaning | Accepted by the lead: versioned CSV-only and LOAO memberships and airport-role manifests; see DATA_CONTRACTS §6 | Consumer-side training/scoring selection still required | Implement and stage approved cohorts; rebuild dependent snapshots |
 | WP-D4: ratio labels | Accepted by the lead: primary ratio labels and missing/nonpositive-reference detail mapping; see DATA_CONTRACTS §7 | Downstream baseline/model support still required | Stage approved ratio labels with frozen reference |
 | WP-D5: operational feed | Simulated availability latency, valid source-hour coverage and freshness for lagged operations | Operations-context features and persistence eligibility | Weather-plus-schedule variant; feed fixtures |
