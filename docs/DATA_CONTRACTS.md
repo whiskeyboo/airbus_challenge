@@ -107,6 +107,7 @@ Key: `(airport_icao, hour_start_utc, source_snapshot_id)`.
 | `coverage_status` | `complete_for_source_scope`, `partial`, `missing` |
 | `coverage_fraction` | float64 nullable; define numerator/denominator if supplied |
 | `schedule_knowledge_basis` | string |
+| `data_mode` | `real` or `fixture`, required; one value per table |
 
 Generate a complete UTC hour grid, not just hours with records. Use zero only when the source partition is complete for the declared reporting scope and no qualifying movement occurred. This does not imply coverage of every aircraft category. A 25-hour local day still has unique UTC hours.
 
@@ -116,6 +117,10 @@ Generate a complete UTC hour grid, not just hours with records. Use zero only wh
 
 Required columns:
 `prediction_id`, `task`, `airport_icao`, `flight_id?`, `as_of_utc`, `target_start_utc`, `target_end_utc`, `horizon_h`, `schedule_snapshot_id?`, `cohort_version`, `data_mode`.
+
+`task` is one of `throughput`, `severe_delay`.
+
+A request is in scope for a split, task and `cohort_version` when its target falls in that split and `as_of_utc` is at or after the training fit cutoff. Results are never pooled across cohorts. The CSV-only comparison and each leave-one-airport-out test use their own `cohort_version`; CSV-only versions start with `csv_only`.
 
 For flights, `target_start_utc` is the scheduled departure instant and `target_end_utc` is null. For airport tasks, it is the target hour and end is start + 1 hour. `horizon_h` must equal the target-start/as-of difference in hours.
 
@@ -144,9 +149,22 @@ Weather `reason_codes` (policies in `docs/DECISIONS.md` P13-P15):
 Path: `data/labels/labels.parquet`.
 Key: `(prediction_id, target_kind, label_version)`.
 
-Fields: `prediction_id`, `target_kind`, `y_true` (nullable float64), `eligible` (bool), `exclusion_reason` (nullable string), `outcome_available_at_utc` (nullable timestamp), `availability_basis`, `label_source`, `label_version`, `unit`.
+Fields: `prediction_id`, `target_kind`, `y_true` (nullable float64), `eligible` (bool), `exclusion_reason` (nullable string), `exclusion_detail` (nullable string), `outcome_available_at_utc` (nullable timestamp), `availability_basis`, `label_source`, `label_version`, `unit`, `data_mode` (`real` or `fixture`, required; one value per table).
 
-Allowed main targets: `official_aar`, `reporting_carrier_touchdowns`, `departure_delay_gt45`, `cancellation`. Binary outcomes must be exactly 0 or 1. Labels are outcomes, never features.
+`exclusion_reason` is null exactly when `eligible` is true. Otherwise it is one of `cancelled`, `coverage_incomplete`, `missing_outcome`, `quarantined`. `exclusion_detail` holds the producer's specific reason and follows the same null rule; evaluators don't validate its values.
+
+| `exclusion_detail` | `exclusion_reason` |
+| --- | --- |
+| `cancelled` | `cancelled` |
+| `timestamp_quarantined` | `quarantined` |
+| `unresolved_arrival_fraction_gt_0.05` | `coverage_incomplete` |
+| `missing_source_month` | `coverage_incomplete` |
+| `unknown_cancellation_status` | `missing_outcome` |
+| `missing_departure_delay` | `missing_outcome` |
+
+Every prediction request in scope has a label row for each target it is scored on, including excluded ones, so denominators stay visible. A table holds one `label_version`.
+
+Allowed main targets: `official_aar`, `reporting_carrier_touchdowns`, `throughput_over_clear_weather_p95`, `departure_delay_gt45`, `cancellation`. Binary outcomes must be exactly 0 or 1. Labels are outcomes, never features.
 
 ## 8. Predictions and serving
 
@@ -157,6 +175,8 @@ Fields: request keys, `target_kind`, `estimate` (nullable float64), `p10`, `p90`
 
 - Regression estimate is the declared point estimator; classification estimate is a probability in [0,1].
 - `p10/p90` are regression predictive quantiles, not classification confidence intervals. Enforce p10 <= p90; fix crossing with a documented method. A mean estimate need not mathematically lie between those quantiles.
+- A model writes a row for every request in scope. A request it cannot score is `unavailable`, never omitted.
+- `artifacts/<run_id>/manifest.json` records at least `run_id`, `data_mode`, `commit_dirty` and a timezone-aware `fit_cutoff_utc`. The evaluator refuses a run that scores a request issued before its cutoff. A model for a leave-one-airport-out test also records `train_airports`.
 - Unavailable means null estimate and a nonempty reason list. Degraded means an actually validated fallback or model capability, not a random imputation.
 - Baselines use the same schema with their own model IDs.
 - Explanations use a companion table: prediction/model key, feature, feature value, contribution, contribution scale, explanation method. Probabilistic log-odds contributions are labelled as such.
