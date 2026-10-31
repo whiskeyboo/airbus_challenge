@@ -46,6 +46,17 @@ Prefer provider documentation over third-party package assumptions. A package is
 
 For each source record: tested URL/parameters excluding credentials, UTC test time, status, request duration, response checksum, parser version, returned fields, station/time coverage, example validation results, retry behaviour, and any access limitation. A saved manual ZIP may support cached development, but does not prove automatic public ingestion.
 
+Results from `download.py` on 2026-10-31, 03:39–04:04 UTC. URLs, sizes, SHA-256 and retrieval times per file are in `data/raw/manifest.json`.
+
+| Source | Scope | Result | Coverage checks |
+| --- | --- | --- | --- |
+| BTS On-Time | 32 monthly zips, 2022-12 to 2025-07 | 18.56M rows, all zips pass CRC, each file holds only its own month | 362 airports; only PBI lacks an `airportsdata` timezone |
+| IEM METAR | ATL and DFW, 2022-12-30 to 2025-08-01, routine and special reports | 26,533 and 26,434 reports | 99.95% and 99.98% of UTC hours; largest gaps 4 h and 2 h; one duplicate key each; `drct` blank on 1.6% |
+| IEM TAF | KATL and KDFW, issued in the same window | 12,003 and 8,855 bulletins | Largest issuance gaps 4.9 h and 6.8 h |
+| Provided CSV | Not re-downloaded; local copy hashed | SHA-256 `9a9d8065…c99ba7` | 25,299 hub rows, 0.75% of BTS hub rows; 99.99% found in BTS with identical `DEP_DELAY` |
+
+Limits: a run from an empty folder has not been shown for the CSV. The first run had no retry logging. Retries are now logged, so rerun on a clean copy for full evidence.
+
 ## Data governance
 
 Record source terms, attribution, redistribution constraints, and permission for supplemental competition data. Never commit secrets or restricted source files. Public documentation does not imply public access to every underlying record. Use an approved organiser extract when provided and preserve its provenance.
