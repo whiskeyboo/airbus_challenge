@@ -15,8 +15,8 @@ FLIGHTS = Path("data/processed/flights.parquet")
 REQUESTS = Path("data/processed/prediction_requests.parquet")
 HOURLY = Path("data/processed/airport_hourly.parquet")
 LABELS = Path("data/labels/labels.parquet")
-VERSION = "0.4.0"
-LABEL_VERSION = "0.3.0"
+VERSION = "0.5.0"
+LABEL_VERSION = "0.4.0"
 METRICS = {
     "scheduled_departures": (
         "origin_icao",
@@ -249,10 +249,45 @@ def airport_hours(flights, icao, start, end, snapshot, complete=True, data_mode=
     return out
 
 
+LABEL_AVAILABILITY = {
+    "version": "simulated-outcomes/1",
+    "basis": "simulated",
+    "hourly_latency_min": 10,
+    "departure_latency_min": 10,
+    "cancellation_latency_h": 24,
+}
+
+
+def label_timing(policy=None):
+    policy = dict(LABEL_AVAILABILITY if policy is None else policy)
+    if (
+        policy.get("basis") != "simulated"
+        or policy.get("version") != "simulated-outcomes/1"
+    ):
+        raise ValueError("Unknown label availability policy")
+    if any(
+        policy[k] < 0
+        for k in [
+            "hourly_latency_min",
+            "departure_latency_min",
+            "cancellation_latency_h",
+        ]
+    ):
+        raise ValueError("Negative simulated outcome latency")
+    return policy
+
+
 def label_rows(
-    requests, outcomes, hourly, threshold=45, data_mode="real", ratio_target=None
+    requests,
+    outcomes,
+    hourly,
+    threshold=45,
+    data_mode="real",
+    ratio_target=None,
+    availability=None,
 ):
     validate_data_mode(data_mode)
+    timing = label_timing(availability)
     frames = []
     for task, req in requests.groupby("task", sort=False):
         if task == "severe_delay":
@@ -269,6 +304,27 @@ def label_rows(
                 indexed, on="flight_id", how="left", validate="many_to_one"
             )
             missing = ~joined._outcome_present.fillna(False).astype(bool)
+            departure = joined.scheduled_dep_utc + pd.to_timedelta(
+                joined.dep_delay_min, unit="m"
+            )
+            clocks = joined[
+                [
+                    c
+                    for c in [
+                        "scheduled_dep_utc",
+                        "scheduled_arr_utc",
+                        "actual_dep_utc",
+                        "wheels_off_utc",
+                        "wheels_on_utc",
+                        "actual_arr_utc",
+                    ]
+                    if c in joined
+                ]
+            ].copy()
+            clocks["derived_departure"] = departure
+            cancellation_known = clocks.max(axis=1) + pd.Timedelta(
+                hours=timing["cancellation_latency_h"]
+            )
             for target in ["departure_delay_gt45", "cancellation"]:
                 df = pd.DataFrame(
                     {"prediction_id": joined.prediction_id, "target_kind": target}
@@ -289,6 +345,12 @@ def label_rows(
                 df["eligible"] = reason.isna()
                 df["y_true"] = value.where(df.eligible)
                 df["exclusion_reason"] = reason
+                known = (
+                    departure + pd.Timedelta(minutes=timing["departure_latency_min"])
+                    if target == "departure_delay_gt45"
+                    else cancellation_known
+                )
+                df["outcome_available_at_utc"] = known.where(df.eligible)
                 df["unit"] = "binary"
                 frames.append(df)
         elif task == "throughput":
@@ -315,6 +377,9 @@ def label_rows(
             df["exclusion_reason"] = joined.throughput_exclusion_reason.fillna(
                 "missing_airport_hour"
             ).mask(df.eligible)
+            df["outcome_available_at_utc"] = (
+                joined.hour_end_utc + pd.Timedelta(minutes=timing["hourly_latency_min"])
+            ).where(df.eligible)
             df["unit"] = "touchdowns/hour"
             frames.append(df)
             if ratio_target is not None:
@@ -358,17 +423,21 @@ def label_rows(
                 # An unexplained missing ratio is a broken producer contract, not a guessed reason.
                 ratio["exclusion_reason"] = reason.mask(ratio.eligible)
                 ratio["y_true"] = value.where(ratio.eligible)
+                ratio["outcome_available_at_utc"] = (
+                    joined.loc[primary, "hour_end_utc"]
+                    + pd.Timedelta(minutes=timing["hourly_latency_min"])
+                ).where(ratio.eligible)
                 ratio["unit"] = "ratio"
                 frames.append(ratio)
         else:
             raise ValueError(f"Unknown prediction task: {task}")
     labels = label_exclusions(pd.concat(frames, ignore_index=True))
     labels["data_mode"] = pd.Series(data_mode, index=labels.index, dtype="string")
-    # Final BTS publication times are not evidenced. Event time is not archive availability.
-    labels["outcome_available_at_utc"] = pd.Series(
-        pd.NaT, index=labels.index, dtype="datetime64[us, UTC]"
-    )
-    labels["availability_basis"] = "unknown"
+    # Explicit operational replay simulation, never a claim about BTS publication time.
+    labels["outcome_available_at_utc"] = pd.to_datetime(
+        labels.outcome_available_at_utc, utc=True
+    ).astype("datetime64[us, UTC]")
+    labels["availability_basis"] = "simulated"
     labels["label_source"] = "BTS On-Time Reporting Carrier"
     labels["label_version"] = LABEL_VERSION
     return labels[LABEL_SCHEMA.names]
@@ -407,7 +476,23 @@ def clear_weather_hours(weather, rule):
 
 
 def add_capacity_ratio(hourly, weather, airports, experiment):
-    out = hourly.copy()
+    ratio_name = experiment["targets"]["capacity_ratio"]
+    out = hourly.drop(
+        columns=[
+            "clear_weather_p95_arrivals_per_hour",
+            "clear_weather_fit_hours",
+            "clear_weather_reference_id",
+            "clear_weather_fit_end_utc",
+            "capacity_ratio_status",
+            ratio_name,
+        ],
+        errors="ignore",
+    ).copy()
+    timing = label_timing(experiment.get("label_availability"))
+    out["outcome_available_at_utc"] = out.hour_end_utc + pd.Timedelta(
+        minutes=timing["hourly_latency_min"]
+    )
+    out["availability_basis"] = "simulated"
     unknown = sorted(set(out.airport_icao) - set(airports))
     if unknown:
         raise ValueError(f"Capacity reference airport configuration missing: {unknown}")
@@ -431,6 +516,7 @@ def add_capacity_ratio(hourly, weather, airports, experiment):
     eligible = (
         train.coverage_status.eq("complete_for_source_scope")
         & train.n_unresolved.eq(0)
+        & train.outcome_available_at_utc.le(end)
         & train.reporting_carrier_touchdowns.notna()
         & train.benign.fillna(False)
     )
@@ -462,7 +548,8 @@ def add_capacity_ratio(hourly, weather, airports, experiment):
         validate="many_to_one",
     )
     policy = {
-        "version": "p10-capacity/1",
+        "version": "p10-capacity/2",
+        "label_availability": timing,
         "p10_status": "accepted by project lead, 2026-10-31, conversation approval",
         "train_start_utc": start.isoformat(),
         "train_end_exclusive_utc": end.isoformat(),
@@ -472,7 +559,7 @@ def add_capacity_ratio(hourly, weather, airports, experiment):
         "quantile": 0.95,
         "interpolation": "linear",
         "weather_hour_rule": "at least one report; every report must satisfy P10; missing weather and corrected reports reject the hour; observation-time bins; no future-weather join",
-        "throughput_fit_rule": "training hours only; complete_for_source_scope with zero unresolved arrivals",
+        "throughput_fit_rule": "training hours only; complete_for_source_scope with zero unresolved arrivals and simulated outcome availability at/before fit cutoff",
         "sparse_policy": "no pooling or imputation; expose fit-hour counts; zero/nonpositive references and missing groups yield null ratios",
         "ratio_policy": "observed throughput divided by the frozen reference, without clipping; outcome-only historical throughput comparison, not measured physical capacity",
     }
@@ -688,6 +775,7 @@ def build(requests_path=None, output_dir=None, reuse_hourly=False):
         raise ValueError("Input Parquet hash disagrees with manifest")
     if request_manifest["source_flights_sha256"] != manifest["parquet_sha256"]:
         raise ValueError("Requests and targets must use the same flight archive")
+    timing = label_timing(experiment.get("label_availability"))
     data_mode = manifest["data_mode"]
     validate_data_mode(data_mode)
     if request_manifest["data_mode"] != data_mode:
@@ -715,6 +803,8 @@ def build(requests_path=None, output_dir=None, reuse_hourly=False):
         "dest_timezone",
         "scheduled_dep_utc",
         "scheduled_arr_utc",
+        "actual_dep_utc",
+        "actual_arr_utc",
         "wheels_off_utc",
         "wheels_on_utc",
         "raw_CRSDepTime",
@@ -744,6 +834,11 @@ def build(requests_path=None, output_dir=None, reuse_hourly=False):
             "origin_icao",
             "source_flight_date",
             "scheduled_dep_utc",
+            "scheduled_arr_utc",
+            "actual_dep_utc",
+            "wheels_off_utc",
+            "wheels_on_utc",
+            "actual_arr_utc",
             "dep_delay_min",
             "cancelled",
         ]
@@ -762,7 +857,12 @@ def build(requests_path=None, output_dir=None, reuse_hourly=False):
             for icao in config["airports"]
         ]
         hourly = pd.concat(frames, ignore_index=True)
-    if not reuse_hourly:
+    refit_reference = (
+        not reuse_hourly
+        or capacity.get("version") != "p10-capacity/2"
+        or capacity.get("label_availability") != timing
+    )
+    if refit_reference:
         weather = pd.read_parquet(
             "data/processed/weather_observations.parquet",
             columns=[
@@ -776,7 +876,7 @@ def build(requests_path=None, output_dir=None, reuse_hourly=False):
                 "source_record_id",
             ],
         )
-    if not reuse_hourly:
+    if refit_reference:
         hourly, capacity = add_capacity_ratio(
             hourly, weather, config["airports"], experiment
         )
@@ -812,7 +912,7 @@ def build(requests_path=None, output_dir=None, reuse_hourly=False):
             "source_scope": "BTS reporting-carrier flights with departure service months in the source manifest; excludes cancelled movements; diverted arrivals only when DivReachedDest=1",
             "capacity_ratio": capacity,
             "capacity_weather_sha256": cached["capacity_weather_sha256"]
-            if reuse_hourly
+            if reuse_hourly and not refit_reference
             else sha256(Path("data/processed/weather_observations.parquet")),
             "reused_hourly_sha256": cached["parquet_sha256"] if reuse_hourly else None,
             "min_time_utc": start,
@@ -833,7 +933,17 @@ def build(requests_path=None, output_dir=None, reuse_hourly=False):
         bias = exclusion_audit(hourly, flights, experiment, weather)
         bias_weather_sha = sha256(Path("data/processed/weather_observations.parquet"))
     outcomes = flights[
-        ["flight_id", "dep_delay_min", "cancelled", "scheduled_dep_utc"]
+        [
+            "flight_id",
+            "dep_delay_min",
+            "cancelled",
+            "scheduled_dep_utc",
+            "scheduled_arr_utc",
+            "actual_dep_utc",
+            "wheels_off_utc",
+            "wheels_on_utc",
+            "actual_arr_utc",
+        ]
     ].set_index("flight_id")
     if not outcomes.index.is_unique:
         raise ValueError("Duplicate flight_id in outcome lookup")
@@ -869,6 +979,7 @@ def build(requests_path=None, output_dir=None, reuse_hourly=False):
                 experiment["targets"]["severe_delay_threshold_min"],
                 data_mode=data_mode,
                 ratio_target=experiment["targets"]["capacity_ratio"],
+                availability=timing,
             )
             writer.write_table(
                 pa.Table.from_pandas(labels, schema=LABEL_SCHEMA, preserve_index=False)
@@ -937,14 +1048,17 @@ def build(requests_path=None, output_dir=None, reuse_hourly=False):
             "cohorts": definitions,
             "cohort_versions": list(definitions),
             "capacity_reference_id": capacity["reference_id"],
-            "model_fit_eligibility": "pending WP-D1 release policy and WP-D2 tolerance approval; outcome construction is not model fitting",
+            "model_fit_eligibility": "eligible labels require outcome_available_at_utc <= declared fit cutoff; operational availability is simulated, not evidenced BTS publication",
+            "timestamp_tolerance_min": 2,
+            "timestamp_tolerance_status": "accepted for this delivery under lead delegated completion",
+            "label_availability": timing,
             "candidate_dependency_note": "new cohorts require feature regeneration; existing feature artifacts are not declared compatible",
             "exclusion_audit": bias,
             "bias_weather_sha256": bias_weather_sha,
             "exclusion_report_status": "reused prior report; no new audit run"
             if reuse_hourly
             else "generated with outcomes",
-            "availability_policy": "unknown BTS historical publication time; explicit simulated release policy required before enforcing model-fit availability cutoffs",
+            "availability_policy": "declared simulated operational replay: hour end +10min; departure +10min; latest resolved scheduled/actual flight time +24h for cancellation; actual BTS publication time remains unknown",
             "threshold_min": experiment["targets"]["severe_delay_threshold_min"],
             "threshold_operator": "strictly greater than",
             "min_target_utc": start + pd.Timedelta(days=2),
@@ -963,7 +1077,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--reuse-hourly",
         action="store_true",
-        help="Reuse verified frozen hourly outcomes/reference without refitting",
+        help="Reuse verified hourly counts; update the reference only when its policy changes",
     )
     args = parser.parse_args()
     build(args.requests, args.output_dir, args.reuse_hourly)

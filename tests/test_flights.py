@@ -509,8 +509,9 @@ def test_label_45_46_cancelled_and_other_timestamp_quarantine():
     assert pd.isna(severe.y_true.iloc[2])
     assert severe.exclusion_reason.iloc[2] == "cancelled"
     assert labels[labels.target_kind.eq("cancellation")].y_true.tolist() == [0, 0, 1]
-    assert labels.outcome_available_at_utc.isna().all()
-    assert labels.availability_basis.eq("unknown").all()
+    assert labels.loc[labels.eligible, "outcome_available_at_utc"].notna().all()
+    assert labels.loc[~labels.eligible, "outcome_available_at_utc"].isna().all()
+    assert labels.availability_basis.eq("simulated").all()
 
 
 @pytest.mark.parametrize("all_cohorts", [False, True])
@@ -621,7 +622,7 @@ def test_requests_and_targets_end_to_end_fixture(tmp_path, monkeypatch, all_coho
     ratios = scope[scope.target_kind.eq("throughput_over_clear_weather_p95")]
     assert set(ratios.cohort_version) == {requests.COHORT_VERSION}
     assert len(ratios) == 96
-    assert labels.label_version.eq("0.3.0").all()
+    assert labels.label_version.eq("0.4.0").all()
     assert summary
     if all_cohorts:
         originals = {
@@ -1299,3 +1300,87 @@ def test_schedule_audit_reads_only_declared_schedule_columns(tmp_path, monkeypat
     assert report["raw_reconciliation"].startswith("passed")
     assert report["rows"] == 2
     assert len(report["national_carrier_scope"]) == 1
+
+
+def test_simulated_flight_label_timing_uses_departure_and_latest_flight_time():
+    from airbus_challenge.requests import flight_requests
+    from airbus_challenge.targets import label_rows
+
+    df = outcome_fixture(
+        [row(), row(Flight_Number_Reporting_Airline="124", Cancelled="1")]
+    )
+    req = flight_requests(
+        df,
+        ["KATL"],
+        [3],
+        pd.Timestamp("2023-01-15T00:00Z"),
+        pd.Timestamp("2023-01-16T00:00Z"),
+        "fixture",
+    )
+    fields = ["flight_id", "dep_delay_min", "cancelled", *TIMES]
+    labels = label_rows(req, df[fields], pd.DataFrame(), data_mode="fixture")
+    delays = labels[labels.target_kind.eq("departure_delay_gt45")]
+    cancellations = labels[labels.target_kind.eq("cancellation")]
+    assert delays.iloc[0].outcome_available_at_utc == pd.Timestamp("2023-01-15T15:05Z")
+    assert pd.isna(delays.iloc[1].outcome_available_at_utc)
+    assert cancellations.outcome_available_at_utc.eq(
+        pd.Timestamp("2023-01-16T17:30Z")
+    ).all()
+    assert labels.availability_basis.eq("simulated").all()
+
+
+def test_simulated_hourly_and_ratio_labels_share_hour_end_timing():
+    from airbus_challenge.requests import airport_requests
+    from airbus_challenge.targets import airport_hours, label_rows
+
+    start, end = pd.Timestamp("2023-01-15T17:00Z"), pd.Timestamp("2023-01-15T18:00Z")
+    hourly = airport_hours(
+        outcome_fixture([row()]), "KDFW", start, end, "fixture", data_mode="fixture"
+    )
+    hourly["capacity_ratio_status"] = "available"
+    hourly["throughput_over_clear_weather_p95"] = 0.5
+    req = airport_requests(["KDFW"], [3], start, end, "fixture", "fixture")
+    labels = label_rows(
+        req,
+        pd.DataFrame(),
+        hourly,
+        data_mode="fixture",
+        ratio_target="throughput_over_clear_weather_p95",
+    )
+    assert len(labels) == 2
+    assert labels.outcome_available_at_utc.eq(pd.Timestamp("2023-01-15T18:10Z")).all()
+
+
+@pytest.mark.parametrize(
+    ("latency", "fit_hours", "reference"), [(10, 2, 10.0), (0, 3, 95000.5)]
+)
+def test_reference_fit_respects_simulated_release_cutoff(latency, fit_hours, reference):
+    from copy import deepcopy
+
+    from airbus_challenge.targets import LABEL_AVAILABILITY, add_capacity_ratio
+
+    hourly, weather = capacity_fixture(
+        [
+            ("KATL", "2023-01-01T23:00Z", 10),
+            ("KATL", "2023-12-31T22:00Z", 20),
+            ("KATL", "2023-12-31T23:00Z", 100000),
+        ]
+    )
+    experiment = deepcopy(CAPACITY_EXPERIMENT)
+    experiment["label_availability"] = {
+        **LABEL_AVAILABILITY,
+        "hourly_latency_min": latency,
+    }
+    out, report = add_capacity_ratio(hourly, weather, CONFIG["airports"], experiment)
+    assert report["fit_hours"] == fit_hours
+    assert out.iloc[0].clear_weather_p95_arrivals_per_hour == reference
+    assert out.iloc[2].outcome_available_at_utc == pd.Timestamp(
+        "2024-01-01T00:00Z"
+    ) + pd.Timedelta(minutes=latency)
+
+
+def test_negative_simulated_label_latency_is_rejected():
+    from airbus_challenge.targets import LABEL_AVAILABILITY, label_timing
+
+    with pytest.raises(ValueError, match="Negative"):
+        label_timing({**LABEL_AVAILABILITY, "departure_latency_min": -1})

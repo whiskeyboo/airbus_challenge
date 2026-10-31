@@ -12,8 +12,8 @@ import yaml
 
 RAW = Path("data/raw")
 OUTPUT = Path("data/processed/flights.parquet")
-TOLERANCE_MIN = 2  # PROPOSED: integrator approval required before production use.
-VERSION = "0.1.1"
+TOLERANCE_MIN = 2  # Selected for delivery under lead-directed completion, 2026-10-31.
+VERSION = "0.1.2"
 KEY = [
     "FlightDate",
     "DOT_ID_Reporting_Airline",
@@ -366,7 +366,7 @@ def build():
         "producer": f"airbus_challenge.clean/{VERSION}",
         "data_mode": "real",
         "tolerance_min": TOLERANCE_MIN,
-        "tolerance_status": "PROPOSED",
+        "tolerance_status": "SELECTED under lead-directed completion, 2026-10-31",
         "duplicate_resolution": "v1: sha256(canonical key|duplicates-v1); duplicate keys append |retained-row-sha256|zero-based occurrence in source order",
         "flight_key_components": KEY,
         "sources": [],
