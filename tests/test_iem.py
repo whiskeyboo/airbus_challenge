@@ -353,3 +353,29 @@ def test_bulletin_issued_early_is_moved_to_the_cycle_its_groups_reach():
     assert iem.bulletin_end(issued, pd.Series([ts("2025-01-10 02:00")]))[0] == ts(
         "2025-01-10 06:00"
     )
+
+
+def test_corrected_metar_has_unknown_availability():
+    df = metar(
+        metar_row(
+            "2023-01-01 00:52",
+            "90",
+            "5",
+            "null",
+            ["FEW"],
+            ["5000"],
+            "KATL 010052Z COR 09005KT",
+        ),
+        metar_row(
+            "2023-01-01 01:52",
+            "90",
+            "5",
+            "null",
+            ["FEW"],
+            ["5000"],
+            "KATL 010152Z 09005KT",
+        ),
+    )
+    assert pd.isna(df.available_at_utc[0]) and df.availability_basis[0] == "unknown"
+    assert "corrected" in df.quality_flags[0]
+    assert df.available_at_utc[1] == df.observed_at_utc[1] + iem.METAR_LATENCY

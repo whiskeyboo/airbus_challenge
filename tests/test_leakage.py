@@ -29,14 +29,19 @@ def metar(
     wx=(),
     pressure=1015.0,
     available=None,
+    flags=(),
+    rid=None,
 ):
+    corrected = "corrected" in flags
     return {
         "airport_icao": "KATL",
         "observed_at_utc": ts(observed),
-        "available_at_utc": ts(observed) + LATENCY
+        "available_at_utc": pd.NaT
+        if corrected
+        else ts(observed) + LATENCY
         if available is None
         else ts(available),
-        "source_record_id": f"m-{observed}",
+        "source_record_id": rid or f"m-{observed}",
         "raw_ref": f"fixture#{observed}",
         "wind_from_deg": wind_from,
         "wind_kt": wind,
@@ -50,6 +55,7 @@ def metar(
         "pressure_hpa": pressure,
         "precip_1h_mm": 0.0,
         "wx_codes": list(wx),
+        "quality_flags": list(flags),
     }
 
 
@@ -284,74 +290,105 @@ def test_conflicting_bulletin_falls_back_to_previous_and_says_so():
     assert row.reason_codes == ["taf_conflict_fallback"]
 
 
-# §7 test 9: adding or changing any record dated after T leaves the snapshot byte-identical.
-def test_mutating_post_t_records_leaves_snapshot_byte_identical():
-    req = pd.concat(
-        [
-            request("2023-06-01 12:00", "2023-06-01 15:00"),
-            request("2023-06-01 12:00", "2023-06-02 00:00"),
-            request("2023-06-01 11:00", "2023-06-01 20:00"),
-        ],
-        ignore_index=True,
+def mutate_after(obs, fc, cutoff):
+    """Change every record not available by cutoff and add new post-cutoff records."""
+    obs = obs.copy()
+    late = obs["available_at_utc"] > cutoff
+    obs.loc[late, ["wind_kt", "visibility_sm", "pressure_hpa"]] = [99.0, 0.0, 950.0]
+    obs.loc[late, "wx_codes"] = pd.Series(
+        [["+TSRA"]] * late.sum(), index=obs.index[late]
     )
-    req["horizon_h"] = [3, 12, 9]
-    obs, fc = obs_table(*OBS), fc_table(ROUTINE, AMEND_1210)
-    base, base_lin = features.snapshot(obs, fc, req)
-
-    mutated_obs = obs.copy()
-    late = mutated_obs["available_at_utc"] > ts("2023-06-01 12:00")
-    mutated_obs.loc[late, ["wind_kt", "visibility_sm", "pressure_hpa"]] = [
-        99.0,
-        0.0,
-        950.0,
-    ]
-    mutated_obs = pd.concat(
+    fc = fc.copy()
+    after = fc["available_at_utc"] > cutoff
+    fc.loc[after, ["visibility_sm", "ceiling_ft"]] = [0.0, 0.0]
+    obs = pd.concat(
         [
-            mutated_obs,
+            obs,
             obs_table(
-                metar("2023-06-01 12:52", wind=60.0, wx=("+TSRA",)),
-                metar("2023-06-01 15:52", status="variable", wind=20.0),
+                metar(str(cutoff + pd.Timedelta(minutes=52)), wind=60.0, wx=("+TSRA",)),
+                metar(
+                    str(cutoff + pd.Timedelta(hours=3)), status="variable", wind=20.0
+                ),
+                # Observed before T but only available after it.
+                metar(str(cutoff - pd.Timedelta(minutes=5)), wind=45.0, vis=0.25),
             ),
         ],
         ignore_index=True,
     )
-    mutated_fc = fc.copy()
-    after = mutated_fc["issued_at_utc"] > ts("2023-06-01 12:00")
-    mutated_fc.loc[after, ["visibility_sm", "ceiling_ft"]] = [0.0, 0.0]
-    extra = fc_table(
-        bulletin(
-            "A1500",
-            "2023-06-01 15:00",
-            "2023-06-02 18:00",
-            [
-                (
-                    "prevailing",
-                    "2023-06-01 15:00",
+    fc = pd.concat(
+        [
+            fc,
+            fc_table(
+                # Issued 5 min before T, available 5 min after it.
+                bulletin(
+                    "ISSUED_PRE_T",
+                    str(cutoff - pd.Timedelta(minutes=5)),
                     "2023-06-02 18:00",
-                    0.1,
-                    100.0,
-                    ("TS",),
-                    None,
-                )
-            ],
-            amendment=True,
-        )
+                    [
+                        (
+                            "prevailing",
+                            str(cutoff - pd.Timedelta(minutes=5)),
+                            "2023-06-02 18:00",
+                            0.1,
+                            100.0,
+                            ("TS",),
+                            None,
+                        )
+                    ],
+                    amendment=True,
+                ),
+                bulletin(
+                    "LATER",
+                    str(cutoff + pd.Timedelta(hours=2)),
+                    "2023-06-02 18:00",
+                    [
+                        (
+                            "prevailing",
+                            str(cutoff + pd.Timedelta(hours=2)),
+                            "2023-06-02 18:00",
+                            0.1,
+                            100.0,
+                            ("TS",),
+                            None,
+                        )
+                    ],
+                    amendment=True,
+                ),
+            ),
+        ],
+        ignore_index=True,
     )
-    mutated_fc = pd.concat([mutated_fc, extra], ignore_index=True)
-    out, lin = features.snapshot(mutated_obs, mutated_fc, req)
+    return obs, fc
+
+
+# §7 test 9: adding or changing any record not available by T leaves the snapshot at T
+# byte-identical. The cutoff is each request's own as_of_utc.
+@pytest.mark.parametrize(
+    "as_of,start,horizon",
+    [
+        ("2023-06-01 12:00", "2023-06-01 15:00", 3),
+        ("2023-06-01 12:00", "2023-06-02 00:00", 12),
+        ("2023-06-01 11:00", "2023-06-01 20:00", 9),
+    ],
+)
+def test_mutating_post_t_records_leaves_snapshot_byte_identical(as_of, start, horizon):
+    req = request(as_of, start).assign(horizon_h=horizon)
+    obs, fc = obs_table(*OBS), fc_table(ROUTINE, AMEND_1210)
+    base, base_lin = features.snapshot(obs, fc, req)
+    out, lin = features.snapshot(*mutate_after(obs, fc, ts(as_of)), req)
     assert parquet_bytes(out) == parquet_bytes(base)
     assert parquet_bytes(lin) == parquet_bytes(base_lin)
 
-    # Control: the same mutation dated before T does change the snapshot.
+    # Controls: the same kinds of change made to records available by T do alter the output.
     early = fc_table(
         bulletin(
-            "A1150",
-            "2023-06-01 11:45",
+            "EARLY",
+            str(ts(as_of) - pd.Timedelta(minutes=15)),
             "2023-06-02 18:00",
             [
                 (
                     "prevailing",
-                    "2023-06-01 11:45",
+                    str(ts(as_of) - pd.Timedelta(minutes=15)),
                     "2023-06-02 18:00",
                     0.1,
                     100.0,
@@ -364,6 +401,111 @@ def test_mutating_post_t_records_leaves_snapshot_byte_identical():
     )
     out, _ = features.snapshot(obs, pd.concat([fc, early], ignore_index=True), req)
     assert parquet_bytes(out) != parquet_bytes(base)
+    changed = obs.copy()
+    changed.loc[changed["available_at_utc"] <= ts(as_of), "wind_kt"] = 40.0
+    out, _ = features.snapshot(changed, fc, req)
+    assert parquet_bytes(out) != parquet_bytes(base)
+
+
+def test_taf_issued_before_t_but_available_after_t_is_not_selected():
+    pre = bulletin(
+        "A1155",
+        "2023-06-01 11:55",
+        "2023-06-02 18:00",
+        [
+            (
+                "prevailing",
+                "2023-06-01 11:55",
+                "2023-06-02 18:00",
+                0.5,
+                200.0,
+                ("FG",),
+                None,
+            )
+        ],
+        amendment=True,
+    )
+    row, lineage = snap(
+        obs_table(*OBS),
+        fc_table(ROUTINE, pre),
+        request("2023-06-01 12:00", "2023-06-01 18:00"),
+    )
+    assert row.taf_visibility_min_sm == 6.0 and row.taf_age_min == 40
+    assert not lineage.source_ref.str.startswith("A1155").any()
+    row, _ = snap(
+        obs_table(*OBS),
+        fc_table(ROUTINE, pre),
+        request("2023-06-01 12:05", "2023-06-01 18:00"),
+    )
+    assert row.taf_visibility_min_sm == 0.5  # Selected once it is available.
+
+
+def test_metar_available_exactly_at_t_is_included():
+    obs = obs_table(*OBS[:3], metar("2023-06-01 11:50", wind=12.0))  # Available 12:00.
+    row, _ = snap(
+        obs, fc_table(ROUTINE), request("2023-06-01 12:00", "2023-06-01 18:00")
+    )
+    assert row.metar_wind_kt == 12.0 and row.metar_age_min == 10
+
+
+def test_corrected_metar_is_never_used_and_skip_is_reported():
+    obs = obs_table(
+        *OBS[:3],
+        metar(
+            "2023-06-01 11:20", wind=25.0, vis=0.5, wx=("TSRA",), flags=("corrected",)
+        ),
+    )
+    row, lineage = snap(
+        obs, fc_table(ROUTINE), request("2023-06-01 12:00", "2023-06-01 18:00")
+    )
+    assert (
+        row.metar_wind_kt == 7.0 and not row.metar_ts_3h
+    )  # 10:52 report, not the COR.
+    assert row.reason_codes == ["metar_cor_skipped"]
+    assert "m-2023-06-01 11:20" not in set(lineage.source_record_id)
+
+    # A COR too recent to have been the latest report anyway is not reported as skipped.
+    obs = obs_table(*OBS[:3], metar("2023-06-01 11:55", flags=("corrected",)))
+    row, _ = snap(
+        obs, fc_table(ROUTINE), request("2023-06-01 12:00", "2023-06-01 18:00")
+    )
+    assert row.reason_codes == []
+
+
+def test_official_report_preferred_over_madis_on_observed_time_tie():
+    obs = obs_table(
+        *OBS[:2],
+        metar(
+            "2023-06-01 10:52",
+            status="missing",
+            wind=np.nan,
+            wind_from=np.nan,
+            flags=("madis_hf", "duplicate_observed_time"),
+            rid="a-madis",
+        ),
+        metar(
+            "2023-06-01 10:52",
+            wind=7.0,
+            flags=("duplicate_observed_time",),
+            rid="z-official",
+        ),
+    )
+    row, lineage = snap(
+        obs, fc_table(ROUTINE), request("2023-06-01 12:00", "2023-06-01 18:00")
+    )
+    assert row.metar_wind_kt == 7.0 and row.metar_wind_status == "directional"
+    assert set(
+        lineage.loc[lineage.feature_group == "metar_latest", "source_record_id"]
+    ) == {"z-official"}
+
+
+def test_variable_taf_wind_counts_as_worst_case_tailwind():
+    fc = fc_table(ROUTINE)
+    fc.loc[1, ["wind_status", "wind_from_deg", "wind_kt"]] = ["variable", np.nan, 15.0]
+    row, _ = snap(obs_table(*OBS), fc, request("2023-06-01 12:00", "2023-06-01 18:00"))
+    assert row.taf_wind_status == "variable"
+    assert row.taf_tailwind_max_kt_hdg == 15.0 and row.taf_tailwind_max_kt_rec == 15.0
+    assert row.taf_crosswind_max_kt == 15.0
 
 
 def test_null_target_end_means_one_hour_window():

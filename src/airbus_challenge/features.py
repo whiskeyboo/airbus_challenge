@@ -12,17 +12,21 @@ from airbus_challenge import iem
 
 INTERIM = Path("data/interim")
 EXPERIMENT = Path("configs/experiment.yaml")
-FEATURE_VERSION = "weather-features/0.1.0"
-# Selection policy: latest bulletin with available_at <= T, ordered by (available_at, issued_at,
-# bulletin_id). Amendments and corrections supersede earlier bulletins. Bulletins flagged
-# conflicting_bulletin_versions are skipped and the previous eligible bulletin is used.
+FEATURE_VERSION = "weather-features/0.2.0"
+# TAF selection policy: latest bulletin with available_at <= T, ordered by (available_at,
+# issued_at, bulletin_id). Amendments and corrections supersede earlier bulletins. A bulletin
+# flagged conflicting_bulletin_versions is skipped: the previous eligible bulletin is used (even
+# if older) and the row gets reason code taf_conflict_fallback. If the chosen bulletin does not
+# cover the target window, TAF features are null (taf_uncovered); no other bulletin is used.
 TAF_POLICY = "taf-select/1"
+# METAR policy: reports without an available_at (corrections, COR) are never used; when a COR
+# would have been the latest report under the simulated latency, the row gets metar_cor_skipped.
+# Ties on observed_at prefer the official report over MADIS high-frequency rows.
+METAR_POLICY = "metar-select/1"
 KEY = ["airport_icao", "as_of_utc", "target_start_utc", "horizon_h"]
 # Trailing windows (1/3/6 h) are on available_at_utc; nothing older than 6 h is read.
 METAR_WINDOW = pd.Timedelta(hours=6)
-METAR_MAX_AGE = pd.Timedelta(
-    hours=3
-)  # Latest report older than this: METAR features are null.
+METAR_MAX_AGE = pd.Timedelta(hours=3)  # Older latest report: METAR features are null.
 WX = {"ts": "TS", "fz": "FZ", "sn": "SN", "fg": "FG", "ra": "RA"}
 TAF_CHAIN = ["prevailing", "FM"]
 METAR_COMPONENTS = [
@@ -163,13 +167,13 @@ FEATURES = {
     ),
     "taf_tailwind_max_kt_hdg": (
         "kt",
-        "null if no direction",
-        "Max prevailing tailwind hdg",
+        "null if uncovered/unspecified",
+        "Max prevailing tailwind hdg; variable wind counts as full speed",
     ),
     "taf_tailwind_max_kt_rec": (
         "kt",
-        "null if no direction",
-        "Max prevailing tailwind rec",
+        "null if uncovered/unspecified",
+        "Max prevailing tailwind rec; variable wind counts as full speed",
     ),
     "taf_gust_crosswind_max_kt": (
         "kt",
@@ -290,14 +294,35 @@ def expand_windows(obs: pd.DataFrame, keys: pd.DataFrame) -> pd.DataFrame:
     return ex
 
 
+def cor_skipped(
+    cor: pd.DataFrame, keys: pd.DataFrame, latest_obs: pd.Series
+) -> pd.Series:
+    """True where a COR observed before T - latency is newer than the latest report used."""
+    k = keys.reset_index(names="key_row").sort_values("as_of_utc")
+    k["cutoff"] = k["as_of_utc"] - iem.METAR_LATENCY
+    c = cor[["airport_icao", "observed_at_utc"]].sort_values("observed_at_utc")
+    m = pd.merge_asof(
+        k, c, left_on="cutoff", right_on="observed_at_utc", by="airport_icao"
+    ).set_index("key_row")
+    newest = m["observed_at_utc"].reindex(keys.index)
+    recent = newest > keys["as_of_utc"] - METAR_WINDOW
+    return (recent & ~(newest <= latest_obs)).fillna(False).astype(bool)
+
+
 def metar_features(
     obs: pd.DataFrame, keys: pd.DataFrame
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """keys: unique (airport_icao, as_of_utc) with a RangeIndex. Returns features and lineage."""
-    ex = expand_windows(obs, keys)
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
+    """keys: unique (airport_icao, as_of_utc) with a RangeIndex.
+
+    Returns features, lineage and a metar_cor_skipped flag per key.
+    """
+    usable = obs["available_at_utc"].notna()
+    obs = obs.assign(_official=~obs["quality_flags"].map(lambda f: "madis_hf" in f))
+    ex = expand_windows(obs[usable], keys)
+    ex = ex.sort_values(["key_row", "observed_at_utc", "_official", "source_record_id"])
     age = ex["as_of_utc"] - ex["available_at_utc"]
     g = ex.groupby("key_row")
-    latest = ex.loc[g["observed_at_utc"].idxmax()].set_index("key_row")
+    latest = ex.groupby("key_row").tail(1).set_index("key_row")
     latest = add_components(latest, "metar_", "wind_kt", "gust_kt")
     f = pd.DataFrame(index=keys.index)
     f["metar_age_min"] = (keys["as_of_utc"] - latest["observed_at_utc"]) / pd.Timedelta(
@@ -322,7 +347,14 @@ def metar_features(
     in1 = age < pd.Timedelta(hours=1)
     w3, w1 = ex[in3], ex[in1]
     g3, g1 = w3.groupby("key_row"), w1.groupby("key_row")
-    first3 = w3.loc[g3["observed_at_utc"].idxmin()].set_index("key_row")
+    first3 = (
+        w3.sort_values(
+            ["key_row", "observed_at_utc", "_official"], ascending=[True, True, False]
+        )
+        .groupby("key_row")
+        .head(1)
+        .set_index("key_row")
+    )
     span = latest["observed_at_utc"] - first3["observed_at_utc"]
     f["metar_pressure_tendency_3h_hpa"] = (
         latest["pressure_hpa"] - first3["pressure_hpa"]
@@ -379,7 +411,8 @@ def metar_features(
         ],
         ignore_index=True,
     )
-    return f, lineage
+    latest_obs = latest["observed_at_utc"].reindex(keys.index)
+    return f, lineage, cor_skipped(obs[~usable], keys, latest_obs)
 
 
 def select_bulletins(fc: pd.DataFrame, keys: pd.DataFrame) -> pd.DataFrame:
@@ -471,6 +504,12 @@ def taf_features(
     assert (segs["available_at_utc"] <= segs["as_of_utc"]).all()
     assert (segs["issued_at_utc"] <= segs["as_of_utc"]).all()
     segs = add_components(segs, "", "wind_kt", "gust_kt")
+    # Worst case for a variable forecast wind: all of it may blow along the runway from behind.
+    variable = segs["wind_status"] == "variable"
+    for end in ("hdg", "rec"):
+        segs[f"tailwind_kt_{end}"] = segs[f"tailwind_kt_{end}"].mask(
+            variable, segs["wind_kt"]
+        )
     segs["ts"] = segs["wx_codes"].map(lambda c: any("TS" in x for x in c)) | segs[
         "raw_group"
     ].str.contains(r"\d{3}CB\b", regex=True)
@@ -574,11 +613,12 @@ def snapshot(
         req["target_start_utc"] + pd.Timedelta(hours=1)
     )
     keys = req[["airport_icao", "as_of_utc"]].drop_duplicates().reset_index(drop=True)
-    mf, mlin = metar_features(obs, keys)
+    mf, mlin, cor = metar_features(obs, keys)
     key_row = req.merge(
         keys.reset_index(names="key_row"), on=["airport_icao", "as_of_utc"], how="left"
     )["key_row"]
     met = mf.loc[key_row].set_index(req.index)
+    cor_rows = cor.loc[key_row].to_numpy()
     taf, tlin, reasons = taf_features(fc, req)
 
     out = pd.concat([req, calendar(req), met, taf], axis=1)
@@ -589,7 +629,8 @@ def snapshot(
         out["metar_age_min"].isna(), "metar_unavailable", "metar_stale"
     )
     out["reason_codes"] = [
-        ([] if m else [mr]) + t for m, mr, t in zip(metar_ok, metar_reason, reasons)
+        ([] if m else [mr]) + (["metar_cor_skipped"] if c else []) + t
+        for m, mr, c, t in zip(metar_ok, metar_reason, cor_rows, reasons)
     ]
     out["status"] = np.select(
         [metar_ok & taf_ok, metar_ok | taf_ok], ["ok", "partial"], "missing"
@@ -604,7 +645,7 @@ def snapshot(
         columns="row"
     )
     lineage["availability_basis"] = "simulated"
-    lineage["transform_version"] = f"{FEATURE_VERSION}+{TAF_POLICY}"
+    lineage["transform_version"] = f"{FEATURE_VERSION}+{METAR_POLICY}+{TAF_POLICY}"
     assert (lineage["contributing_available_at_utc"] <= lineage["as_of_utc"]).all()
     cols = [c for c in req.columns]
     lineage = lineage[cols + [c for c in lineage.columns if c not in cols]]
