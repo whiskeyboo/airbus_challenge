@@ -1,5 +1,5 @@
 /data
-/artifacts/
+/artifacts
 docs/source/
 .env
 .venv/
