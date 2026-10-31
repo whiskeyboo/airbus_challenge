@@ -274,7 +274,9 @@ with replay_tab:
         models = dd.advisory_models(rows)
         model = st.selectbox("Throughput model for the advisory", models, key="adv_model") if models else None  # fmt: skip
         used = dd.advisory_rows(rows, model)
-        rec = recommend.recommend(used, reference())
+        # The run's WP-D7 calibration.json when present, else the provisional thresholds.
+        policy = recommend.load_policy(Path(dd.ARTIFACTS) / run)
+        rec = recommend.recommend(used, reference(), policy)
         st.subheader(f"Level: {rec['level'].upper()}")
         (st.warning if rec["level"] in ("abstain", "watch", "act") else st.success)(rec["message"])
         st.caption(
