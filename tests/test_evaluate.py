@@ -55,6 +55,7 @@ from airbus_challenge.evaluate import (
     scoring_scope,
     skill_metrics,
     squared_errors,
+    weather_names,
     worst_misses,
 )
 
@@ -983,6 +984,7 @@ def canonical(monkeypatch, tmp_path):
     monkeypatch.setattr(evaluate, "LABELS", tmp_path / "labels.parquet")
     monkeypatch.setattr(evaluate, "REQUESTS", tmp_path / "requests.parquet")
     monkeypatch.setattr(evaluate, "REPORTS", tmp_path / "reports")
+    monkeypatch.setattr(evaluate, "SLICES", tmp_path / "slices.parquet")
     for module in (baselines, evaluate):
         monkeypatch.setattr(module, "LEDGER", tmp_path / "ledger")
         monkeypatch.setattr(module, "LEDGER_MIRROR", tmp_path / "mirror")
@@ -1563,7 +1565,8 @@ def test_another_reports_folder_cannot_buy_a_second_locked_run(
 
 
 @pytest.mark.parametrize(
-    "moved", ["labels_path", "requests_path", "reports", "ledger", "mirror"]
+    "moved",
+    ["labels_path", "requests_path", "reports", "ledger", "mirror", "slices_path"],
 )
 def test_locked_main_refuses_non_canonical_paths(tmp_path, clean_git, moved):
     inputs = locked_inputs(tmp_path)
@@ -1994,3 +1997,133 @@ def test_dropped_rows_cannot_change_the_locked_hash(tmp_path, clean_git):
     assert candidate_sha256(scoped) == candidate_sha256(
         table.assign(split=evaluate.split_of(table["target_start_utc"]))
     )
+
+
+# Weather slices (evaluation only)
+
+DAY_THREE = "2024-03-07 15:00"
+
+
+def slices_table(rows: list[tuple]) -> pd.DataFrame:
+    table = pd.DataFrame(
+        rows, columns=["airport_icao", "hour_start_utc", "thunderstorm", "ifr"]
+    )
+    return table.assign(
+        hour_start_utc=pd.to_datetime(table["hour_start_utc"], utc=True).astype(
+            "datetime64[us, UTC]"
+        ),
+        thunderstorm=table["thunderstorm"].astype("boolean"),
+        ifr=table["ifr"].astype("boolean"),
+        low_vis=pd.array([False] * len(table), dtype="boolean"),
+        strong_crosswind=pd.array([False] * len(table), dtype="boolean"),
+        n_metars=np.int32(1),
+        source_record_ids=[["m"]] * len(table),
+        coverage="observed",
+        slice_version="eval-weather-slices/0.1.0",
+    )
+
+
+def sliced_inputs(tmp_path) -> tuple[list, Path]:
+    table = predictions_for(
+        "KATL",
+        [DAY_ONE, DAY_TWO, DAY_THREE],
+        {
+            MODEL: [12.0, 21.0, 33.0],
+            PERSISTENCE: [14.0, 24.0, 30.0],
+            CLIMATOLOGY: [10.0, 20.0, 30.0],
+        },
+    )
+    inputs = run_inputs(table, labels_for(table, [10.0, 20.0, 30.0]), tmp_path)
+    # DAY_THREE has no slice row; a null flag is missing coverage too.
+    slices = slices_table(
+        [
+            ("KATL", DAY_ONE, True, False),
+            ("KATL", DAY_TWO, False, None),
+            ("KDFW", DAY_ONE, True, True),
+        ]
+    )
+    path = tmp_path / "slices.parquet"
+    slices.to_parquet(path)
+    return inputs, path
+
+
+def test_weather_slices_report_metrics_and_denominators(tmp_path, clean_git):
+    inputs, path = sliced_inputs(tmp_path)
+    report = json.loads(main(["run"], *inputs).read_text())
+    records = report["metrics"]
+    common = {"model": MODEL, "airport": "pooled", "horizon": "all", "metric": "rmse"}
+    storm = record(records, slice="weather:thunderstorm", **common)
+    assert (storm["n_predicted"], storm["value"]) == (1, 2.0)
+    calm = record(records, slice="weather:not_thunderstorm", **common)
+    assert (calm["n_predicted"], calm["value"]) == (1, 1.0)
+    unknown = record(records, slice="weather:thunderstorm_unknown", **common)
+    assert (unknown["n_predicted"], unknown["value"]) == (1, 3.0)
+    assert record(records, slice="weather:not_ifr", **common)["n_predicted"] == 1
+    assert record(records, slice="weather:ifr_unknown", **common)["n_predicted"] == 2
+    assert not rows_matching(records, slice="weather:ifr")
+    katl = record(
+        records, slice="weather:thunderstorm", **{**common, "airport": "KATL"}
+    )
+    assert katl["n_predicted"] == 1
+    assert report["weather_slices"]["flags"] == evaluate.WEATHER_FLAGS
+    assert report["weather_slices_reason"] is None
+    assert report["data_sha256"][str(path)] == sha256(path)
+
+
+def test_weather_slices_floor_flight_times_to_the_utc_hour():
+    joined = pd.DataFrame(
+        {"airport_icao": ["KATL", "KATL"], "target_start_utc": [ts(DAY_ONE)] * 2}
+    )
+    joined["target_start_utc"] += pd.to_timedelta([0, 59], unit="min")
+    table = slices_table([("KATL", DAY_ONE, True, False)])
+    names = weather_names(joined, table[["airport_icao", "hour_start_utc",
+                                         *evaluate.WEATHER_FLAGS]])  # fmt: skip
+    assert names["thunderstorm"].tolist() == ["weather:thunderstorm"] * 2
+
+
+def test_binary_weather_slices_report_brier_ap_and_prevalence():
+    table, labels = severe_table([0.9, 0.2, 0.7, 0.1], [1.0, 0.0, 1.0, None])
+    joined = scored(table, labels)
+    targets = sorted(joined["target_start_utc"].unique())
+    slices = slices_table([("KATL", str(t), True, False) for t in targets[:3]])
+    weather = weather_names(joined, slices)
+    records = evaluate.weather_slice_records(joined, weather, {})
+    common = {"airport": "pooled", "slice": "weather:thunderstorm"}
+    assert record(records, metric="brier", **common)["prevalence"] == pytest.approx(
+        2 / 3
+    )
+    assert record(records, metric="average_precision", **common)["value"] == 1.0
+    unknown = record(
+        records, metric="cancellation_rate", airport="pooled",
+        slice="weather:thunderstorm_unknown",
+    )  # fmt: skip
+    assert (unknown["value"], unknown["n_predicted"]) == (1.0, 0)
+    single = record(records, metric="average_precision", **common | {
+        "slice": "weather:not_ifr"})  # fmt: skip
+    assert single["value"] == 1.0
+
+
+def test_a_missing_slices_file_is_recorded_not_fatal(tmp_path, clean_git):
+    inputs, path = sliced_inputs(tmp_path)
+    path.unlink()
+    report = json.loads(main(["run"], *inputs).read_text())
+    assert report["weather_slices"] is None
+    assert report["weather_slices_reason"] == "slices_file_missing"
+    assert not [r for r in report["metrics"] if r["slice"].startswith("weather:")]
+    assert str(path) not in report["data_sha256"]
+
+
+def test_weather_slices_never_touch_predictions_or_scope(tmp_path, clean_git):
+    inputs, _ = sliced_inputs(tmp_path)
+    run = inputs[2] / "run" / "predictions.parquet"
+    before = sha256(run)
+    with_slices = json.loads(main(["run"], *inputs).read_text())
+    without = json.loads(
+        main(["run"], *inputs, slices_path=tmp_path / "absent.parquet").read_text()
+    )
+    assert sha256(run) == before
+    assert with_slices["scoring_scope"] == without["scoring_scope"]
+    assert with_slices["worst_misses"] == without["worst_misses"]
+    plain = [r for r in with_slices["metrics"] if not r["slice"].startswith("weather:")]
+    assert plain == without["metrics"]
+    assert not set(evaluate.WEATHER_FLAGS) & set(baselines.PREDICTION_SCHEMA.names)
