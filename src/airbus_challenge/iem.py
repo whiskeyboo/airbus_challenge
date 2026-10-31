@@ -147,6 +147,10 @@ def metar_table(raw: pd.DataFrame, icao: str, src: dict) -> pd.DataFrame:
         }
     )
     df["quality_flags"] = flags_list(flags)
+    # A COR is sent after the original by an unknown delay and IEM keeps only the corrected
+    # text, so its historical availability is unknown (TEMPORAL_RULES §1: never backdate).
+    df.loc[flags["corrected"], "available_at_utc"] = pd.NaT
+    df.loc[flags["corrected"], "availability_basis"] = "unknown"
     return df.sort_values(["observed_at_utc", "source_record_id"]).reset_index(
         drop=True
     )
