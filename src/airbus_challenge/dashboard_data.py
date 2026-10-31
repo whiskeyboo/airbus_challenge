@@ -360,6 +360,57 @@ def component_table(rec: dict) -> pd.DataFrame:
     )
 
 
+LEVEL_ORDER = ["normal", "watch", "act"]
+
+
+def default_run_index(runs: list[str]) -> int:
+    """Prefer the combined model run, then any model run, then the first (baseline) run."""
+    for preferred in ("lgbm_dev", "lgbm_throughput_dev"):
+        if preferred in runs:
+            return runs.index(preferred)
+    models = [i for i, r in enumerate(runs) if r.startswith("lgbm")]
+    return models[0] if models else 0
+
+
+def _pct(p) -> str:
+    return "n/a" if p is None or pd.isna(p) else f"{100 * float(p):.1f}%"
+
+
+def advisory_cards(rec: dict) -> list[dict]:
+    """One summary card per outcome, built only from recommend()'s returned components."""
+    cards = []
+    for kind, title in (("throughput", "Arrival throughput (AAR proxy)"),
+                        ("severe_delay", "Severe delay (>45 min, if operated)")):  # fmt: skip
+        comps = [c for c in rec["components"] if c["kind"] == kind]
+        if not comps:
+            cards.append({"title": title, "value": "NO DATA", "help": "No predictions of this "
+                          "kind in the run.", "detail": "not in this run"})  # fmt: skip
+            continue
+        scored = [c["level"] for c in comps if c["level"] in LEVEL_ORDER]
+        worst = max(scored, key=LEVEL_ORDER.index) if scored else "abstain"
+        reasons = sorted({r for c in comps if c["level"] == "abstain" for r in c.get("reasons") or []})
+        nums = [c.get("numbers") or {} for c in comps]
+        if kind == "severe_delay":
+            p = max((n.get("max_probability") for n in nums if n.get("max_probability") is not None), default=None)  # fmt: skip
+            detail = f"highest flight probability {_pct(p)}"
+        else:
+            detail = ", ".join(f"h={c.get('horizon_h')}: {c['level']}" for c in comps if c.get("horizon_h") is not None)  # fmt: skip
+        if reasons:
+            detail += f"; abstain: {', '.join(reasons)}"
+        cards.append({"title": title, "value": worst.upper(), "detail": detail or worst,
+                      "help": comps[0]["message"]})  # fmt: skip
+    canc = rec.get("cancellation")
+    n = (canc or {}).get("numbers") or {}
+    cards.append({
+        "title": "Cancellation (reported separately)",
+        "value": _pct(n.get("mean_probability")) if canc else "NO DATA",
+        "detail": f"mean over {n.get('n_scored', 0)} flights; max {_pct(n.get('max_probability'))}; no alert rule"
+        if canc else "no cancellation model in this run",
+        "help": "Average predicted cancellation probability for departures in the window.",
+    })  # fmt: skip
+    return cards
+
+
 def load_drivers(root: Path, run: str, prediction_ids, top: int = 5) -> list[dict]:
     """Per-prediction SHAP drivers if the run wrote them, else []. Global gain importance
     (feature_importance.csv) is not a per-prediction driver, so it is never passed on."""

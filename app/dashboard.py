@@ -95,7 +95,11 @@ with st.sidebar:
         f"**T = {t:%Y-%m-%d %H:%M} UTC**  \n{local:%Y-%m-%d %H:%M %Z} at {icao}"
     )
     runs = dd.list_runs(ROOT)
-    run = st.selectbox("Prediction run", runs, key="run") if runs else None
+    run = (
+        st.selectbox("Prediction run", runs, index=dd.default_run_index(runs), key="run")
+        if runs
+        else None
+    )
     st.caption(
         "Historical replay, not live data. Weather counts as available 10 min after "
         "observation or issue (simulated latency)."
@@ -281,7 +285,7 @@ with replay_tab:
         )
     else:
         models = dd.advisory_models(rows)
-        model = st.selectbox("Throughput model for the advisory", models, key="adv_model") if models else None  # fmt: skip
+        model = st.selectbox("Arrival throughput model", models, key="adv_model") if models else None  # fmt: skip
         used = dd.advisory_rows(rows, model)
         # The run's WP-D7 calibration.json when present, else the provisional thresholds.
         policy = recommend.load_policy(ROOT / dd.ARTIFACTS / run)
@@ -291,10 +295,14 @@ with replay_tab:
                 "This run has no calibrated alert policy. Its provisional advisory levels "
                 "are for demonstration and are not validated for operational use."
             )
-        st.subheader(f"Level: {rec['level'].upper()}")
+        st.subheader(f"Overall level: {rec['level'].upper()}")
         (st.warning if rec["level"] in ("abstain", "watch", "act") else st.success)(
             rec["message"]
         )
+        cards = dd.advisory_cards(rec)
+        for col, card in zip(st.columns(len(cards)), cards):
+            col.metric(card["title"], card["value"], help=card["help"])
+            col.caption(card["detail"])
         st.caption(
             f"Computed by code rules in recommend.py from the saved prediction rows. Thresholds "
             f"are `{rec['threshold_label']}`: {rec['thresholds']['source']}."
@@ -330,7 +338,11 @@ with replay_tab:
         st.info("No advisory, so no brief.")
     else:
         drivers = dd.load_drivers(ROOT, run, used["prediction_id"])
-        if not drivers:
+        if drivers:
+            st.markdown("**Top drivers** (SHAP contributions for these predictions; "
+                        "associations, not causes)")  # fmt: skip
+            st.dataframe(pd.DataFrame(drivers), hide_index=True)
+        else:
             st.caption(
                 f"No per-prediction SHAP drivers ({dd.DRIVERS}) in run `{run}`; global gain "
                 "importance is not a per-prediction driver, so the brief says insufficient data."

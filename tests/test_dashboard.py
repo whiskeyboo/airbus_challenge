@@ -489,3 +489,26 @@ def test_replay_rejects_locked_test_before_reading_outcomes(root, monkeypatch):
     with pytest.raises(ValueError, match="Locked test outcomes"):
         dd.load_replay_outcomes(root, "KDFW", pd.Timestamp("2024-12-31T12:00Z"))
     assert dd.replay_window_is_development(root, pd.Timestamp("2024-12-31T11:00Z"))
+
+
+def test_default_run_prefers_the_combined_model_run():
+    assert dd.default_run_index(["baselines_dev", "lgbm_dev", "lgbm_throughput_dev"]) == 1
+    assert dd.default_run_index(["baselines_dev", "lgbm_delay_dev", "lgbm_throughput_dev"]) == 2
+    assert dd.default_run_index(["baselines_dev"]) == 0
+
+
+def test_advisory_cards_show_worst_level_and_missing_outcomes():
+    rec = {
+        "components": [
+            {"kind": "throughput", "level": "normal", "horizon_h": 3, "message": "m"},
+            {"kind": "throughput", "level": "watch", "horizon_h": 6, "message": "m"},
+            {"kind": "severe_delay", "level": "abstain", "message": "m",
+             "reasons": ["no_prediction_rows"]},
+        ],
+        "cancellation": None,
+    }  # fmt: skip
+    cards = {c["title"]: c for c in dd.advisory_cards(rec)}
+    assert cards["Arrival throughput (AAR proxy)"]["value"] == "WATCH"
+    assert cards["Severe delay (>45 min, if operated)"]["value"] == "ABSTAIN"
+    assert "no_prediction_rows" in cards["Severe delay (>45 min, if operated)"]["detail"]
+    assert cards["Cancellation (reported separately)"]["value"] == "NO DATA"
