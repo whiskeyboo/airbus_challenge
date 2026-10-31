@@ -2127,3 +2127,23 @@ def test_weather_slices_never_touch_predictions_or_scope(tmp_path, clean_git):
     plain = [r for r in with_slices["metrics"] if not r["slice"].startswith("weather:")]
     assert plain == without["metrics"]
     assert not set(evaluate.WEATHER_FLAGS) & set(baselines.PREDICTION_SCHEMA.names)
+
+
+def test_throughput_skill_is_also_reported_against_seasonal_persistence():
+    seasonal = "baseline_seasonal_persistence_v1"
+    table = predictions_for(
+        "KATL",
+        [DAY_ONE, DAY_TWO],
+        {MODEL: [12.0, 21.0], PERSISTENCE: [14.0, 24.0], CLIMATOLOGY: [9.0, 19.0],
+         seasonal: [13.0, 23.0]},
+    )  # fmt: skip
+    records = records_of(table, labels_for(table, [10.0, 20.0]))
+    airport = {"model": MODEL, "airport": "KATL", "horizon": 3}
+    expected = 1 - np.sqrt(5 / 2) / 3  # seasonal misses by 3 both times
+    assert value(records, metric=f"skill_vs_{seasonal}", **airport) == pytest.approx(
+        expected
+    )
+    # Absent from a run, it is reported as absent rather than dropped.
+    plain = records_of(throughput_table(), labels_for(throughput_table(), [10.0, 20.0]))
+    row = record(plain, metric=f"skill_vs_{seasonal}", **airport)
+    assert row["value"] is None and row["reason"] == "baseline_absent"

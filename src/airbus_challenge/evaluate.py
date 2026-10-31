@@ -55,6 +55,7 @@ TARGET_LABELS = {
     SEVERE: "severe departure delay (>45 min, operated flights)",
 }
 PERSISTENCE = "baseline_persistence_v1"
+SEASONAL = "baseline_seasonal_persistence_v1"
 CLIMATOLOGY = "baseline_climatology_v1"
 CONDITIONAL_RATE = "baseline_conditional_rate_v1"
 LOGISTIC = "baseline_logistic_v1"
@@ -140,6 +141,13 @@ def required_baselines(target: str) -> tuple[str, str]:
     return (
         (CONDITIONAL_RATE, LOGISTIC) if target in BINARY else (PERSISTENCE, CLIMATOLOGY)
     )
+
+
+def skill_baselines(target: str) -> tuple[str, ...]:
+    # Seasonal persistence is not required, but the write-up leads with it
+    # because ordinary persistence is weak at 3-12 h.
+    required = required_baselines(target)
+    return required if target in BINARY else (*required, SEASONAL)
 
 
 def is_baseline(models: pd.Series) -> pd.Series:
@@ -625,14 +633,14 @@ def squared_errors(scored: pd.DataFrame) -> pd.DataFrame:
 def baseline_support(squared: pd.DataFrame, model: str, target: str) -> pd.DataFrame:
     if model not in squared:
         return squared.iloc[:0]
-    columns = dict.fromkeys([model, *required_baselines(target)])
+    columns = dict.fromkeys([model, *skill_baselines(target)])
     return squared[[c for c in columns if c in squared]].dropna()
 
 
 def skill_metrics(
     support: pd.DataFrame, days: pd.Series, model: str, target: str
 ) -> list[dict]:
-    baselines = [b for b in required_baselines(target) if b != model]
+    baselines = [b for b in skill_baselines(target) if b != model]
     if support.empty:
         names = {f"skill_vs_{b}": "share" for b in baselines}
         return null_metrics(names, "no_predicted_rows")
