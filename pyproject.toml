@@ -7,8 +7,10 @@ authors = [
 ]
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "airportsdata>=20261030",
     "gdown>=6.5.1",
     "lightgbm>=4.7.0",
+    "matplotlib>=3.11.2",
     "openai>=3.42.0",
     "pandas>=3.1.0",
     "plotly>=7.1.0",
