@@ -72,7 +72,7 @@ Nobody waits idle. Agent 2 builds weather parsing and wind features from step 0.
 
 ## Still open
 
-Tracked in `docs/DECISIONS.md`: P10 benign weather, O09 test window, O10 Drive folder.
+Tracked in `docs/DECISIONS.md`: P10 benign weather.
 
 ## Kickoff prompts
 

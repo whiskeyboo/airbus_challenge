@@ -14,6 +14,8 @@ This is the authoritative register for decisions that change scientific meaning 
 | R06 | Avoid time leakage and include runway directionality | Brief, page 5 |
 | R07 | Preserve AAR/throughput distinction | FAA definition and reviewed methodological correction |
 | R08 | Train the severe-delay model on all BTS flights. The provided CSV flights, identified by `in_provided_csv`, are reported as a separate CSV-only comparison | User decision, 2026-10-31 (closes O08) |
+| R09 | Final test is 2025-01-01 to 2025-08-01, frozen before any test access. It matches the provided CSV, so the CSV-only comparison is scored on the same months. Aug-Dec 2025 may only appear as a separately labelled extra check on supplemental data | User decision, 2026-10-31 (closes O09) |
+| R10 | Keep the current `.env` Drive folder. The folder printed in the brief returns HTTP 401 to scripted access, so it cannot be fetched automatically; the CSV matches the audited profile in `docs/SOURCES.md` (148,273 rows, 123 columns, 2023-01-01 to 2025-07-31) | User decision, 2026-10-31 (closes O10) |
 
 ## Proposed implementation defaults
 
@@ -49,8 +51,6 @@ Basis: `Autonomous SG 2026_Airbus Track.pdf`, Challenge 5, pages 5-6. These are 
 | O05 | Which repository, agent tools, runtime and hosting environment will be used? | Determines setup and deployment | Prepare portable interfaces; no external deployment |
 | O06 | What historical schedule/status knowledge can be evidenced? | Prevents availability overclaims | Declare retrospective simulation and exclude unsupported features |
 | O07 | Is sufficient AAR/TAF/flight coverage available for proposed partitions? | Determines defensible evaluation window | Coverage audit only; do not choose periods based on test skill |
-| O09 | Does the test window stop at July 2025 or cover all of 2025? | `configs/experiment.yaml` and `docs/EVALUATION_PLAN.md` differ | Follow the config; freeze before any test access |
-| O10 | Which Drive folder should `.env` use? | The current ID differs from the folder printed in the brief | Keep the current ID; the CSV is already on disk |
 
 The agents must not invent organiser answers. The humans may send these questions; coding agents must not send external messages without explicit authorisation.
 

@@ -11,9 +11,9 @@ Use target UTC time for partitioning, not archive row order or retrieval time.
 | Train | 2023-01-01 to 2024-01-01 | Initial fitting |
 | Validation | 2024-01-01 to 2024-07-01 | Model/features/hyperparameters |
 | Calibration | 2024-07-01 to 2025-01-01 | Probability/interval calibration and alert policy |
-| Final test | 2025-01-01 to 2026-01-01 | One locked assessment |
+| Final test | 2025-01-01 to 2025-08-01 | One locked assessment (R09) |
 
-The supplied CSV ends July 2025. Full-year 2025 is a proposed supplemental-data experiment, not existing coverage. If permitted data cannot support these periods, revise the protocol based on coverage, record why, and freeze it before comparing test performance. Report a provided-data subset separately when useful; do not splice populations into one score.
+The supplied CSV ends July 2025, so the test ends there too (`docs/DECISIONS.md` R09). August-December 2025 may only be reported as a separately labelled supplemental-data check. If permitted data cannot support these periods, revise the protocol based on coverage, record why, and freeze it before comparing test performance. Report a provided-data subset separately when useful; do not splice populations into one score.
 
 Use rolling validation within the validation period with explicit chronological folds. After selecting settings, a candidate may refit on train+validation, then calibrate on the calibration partition. Freeze it before testing. All fitting rows must have eligible outcomes known by the fit cutoff; do not assume a source's publication time equals the flight event time.
 
