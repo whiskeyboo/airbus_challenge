@@ -76,13 +76,13 @@ def model_frame(X: pd.DataFrame, airports: list[str]) -> pd.DataFrame:
     return out
 
 
-def training_labels(path: Path, ids: list[str]) -> pd.DataFrame:
+def training_labels(path: Path, ids: list[str], target: str = TARGET) -> pd.DataFrame:
     """Eligible throughput labels for the given prediction ids only."""
     labels = (
         ds.dataset(path)
         .to_table(
             columns=["prediction_id", "y_true", "eligible"],
-            filter=(ds.field("target_kind") == TARGET)
+            filter=(ds.field("target_kind") == target)
             & ds.field("prediction_id").isin(ids),
         )
         .to_pandas()
@@ -92,11 +92,13 @@ def training_labels(path: Path, ids: list[str]) -> pd.DataFrame:
     ]
 
 
-def labelled(split: str, root: Path, airports: list[str], labels_path: Path):
-    X = input_qa.assemble(TASK, root, split)
-    lab = training_labels(labels_path, X["prediction_id"].tolist())
+def labelled(split, root, airports, labels_path, task=TASK, target=TARGET, sample=None):
+    X = input_qa.assemble(task, root, split)
+    lab = training_labels(labels_path, X["prediction_id"].tolist(), target)
     df = X.merge(lab, on="prediction_id", how="inner")
-    inputs = registry.model_inputs(TASK)
+    if sample and len(df) > sample:
+        df = df.sample(sample, random_state=SEED).sort_index()
+    inputs = registry.model_inputs(task)
     return model_frame(df[inputs], airports), df["y_true"].to_numpy()
 
 
@@ -210,6 +212,122 @@ def main(
     return run
 
 
+DELAY = {
+    "task": "severe_delay",
+    "target": "departure_delay_gt45",
+    "model_version": "lgbm_delay_v1",
+    "run_id": "lgbm_delay_dev",
+    "unit": "binary",
+    "train_sample": 1_500_000,
+    "val_sample": 500_000,
+}
+
+
+def delay_main(
+    root: Path = Path("."), artifacts: Path = ARTIFACTS, labels_path: Path = LABELS
+):
+    """Severe departure delay (> 45 min) among operated flights; ineligible (cancelled) excluded."""
+    from sklearn.metrics import (
+        average_precision_score,
+        brier_score_loss,
+        precision_recall_curve,
+    )
+
+    d = DELAY
+    airports = list(
+        yaml.safe_load((root / "configs/airports.yaml").read_text())["airports"]
+    )
+    args = (root, airports, labels_path, d["task"], d["target"])
+    train_X, train_y = labelled("train", *args, sample=d["train_sample"])
+    val_X, val_y = labelled("validation", *args, sample=d["val_sample"])
+    model = fit(train_X, train_y, val_X, val_y, {"objective": "binary"})
+    lo, hi = bounds(DEV_SPLITS[0])[0], bounds(DEV_SPLITS[-1])[1]
+    requests = in_scope(
+        ds.dataset(root / REQUESTS)
+        .to_table(
+            columns=baselines.REQUEST_COLUMNS,
+            filter=(ds.field("task") == d["task"])
+            & (ds.field("target_start_utc") >= pa.scalar(lo, pa.timestamp("us", "UTC")))
+            & (ds.field("target_start_utc") < pa.scalar(hi, pa.timestamp("us", "UTC"))),
+        )
+        .to_pandas()
+    )
+    X = pd.concat(
+        [input_qa.assemble(d["task"], root, s) for s in DEV_SPLITS], ignore_index=True
+    )
+    input_qa.validate_inputs(X, d["task"], root)
+    df = requests.merge(
+        X, on="prediction_id", how="left", suffixes=("", "_x"), validate="one_to_one"
+    )
+    inputs = registry.model_inputs(d["task"])
+    proba = model.predict(
+        model_frame(df[inputs], airports), num_iteration=model.best_iteration
+    )
+    ok = df["status"].eq("ok") & df["demand_status"].eq("ok")
+    reasons = [
+        sorted(set(a) | set(b))
+        for a, b in zip(df["reason_codes"], df["demand_reason_codes"])
+    ]
+    weather = ds.dataset(root / registry.PROCESSED / registry.WEATHER_TABLE)
+    snapshot_id = min(
+        set(
+            weather.to_table(
+                columns=["data_snapshot_id"], filter=ds.field("task") == d["task"]
+            )
+            .column(0)
+            .to_pylist()
+        )
+    )
+    preds = requests[baselines.REQUEST_COLUMNS].assign(
+        target_kind=d["target"], estimate=proba, p10=np.nan, p90=np.nan, unit=d["unit"],
+        status=np.where(ok, "available", "degraded"), reason_codes=reasons,
+        model_version=d["model_version"], feature_version=registry.REGISTRY_VERSION,
+        data_snapshot_id=snapshot_id, generated_at_utc=datetime.now(UTC),
+    )  # fmt: skip
+    run = artifacts / d["run_id"]
+    baselines.write_predictions(preds, run / "predictions.parquet")
+    imp = pd.DataFrame(
+        {"feature": model.feature_name(), "gain": model.feature_importance("gain")}
+    )
+    imp.nlargest(15, "gain").to_csv(run / "feature_importance.csv", index=False)
+    # Dev metrics, not via the evaluator (it requires severe-delay baselines that don't exist yet).
+    lab = training_labels(labels_path, preds["prediction_id"].tolist(), d["target"])
+    scored = preds.merge(lab, on="prediction_id")
+    scored["split"] = np.where(
+        scored.target_start_utc < bounds("calibration")[0], "validation", "calibration"
+    )
+    metrics = []
+    for (split, airport), g in scored.groupby(["split", "airport_icao"]):
+        prec, rec, _ = precision_recall_curve(g.y_true, g.estimate)
+        metrics.append({
+            "split": split, "airport": airport, "n_eligible": len(g),
+            "prevalence": float(g.y_true.mean()),
+            "pr_auc": float(average_precision_score(g.y_true, g.estimate)),
+            "brier": float(brier_score_loss(g.y_true, g.estimate)),
+            "recall_at_precision_0.5": float(rec[prec >= 0.5].max()) if (prec >= 0.5).any() else 0.0,
+        })  # fmt: skip
+    manifest = {
+        "run_id": d["run_id"], "producer": "airbus_challenge.train", "model_version": d["model_version"],
+        "commit": baselines.git("rev-parse", "HEAD"), "commit_dirty": baselines.source_dirty(),
+        "data_mode": str(preds["data_mode"].iloc[0]), "data_snapshot_id": snapshot_id,
+        "target": d["target"], "fit_split": "train", "early_stopping_split": "validation",
+        "train_subsample_rows": len(train_y), "val_subsample_rows": len(val_y),
+        "fit_cutoff_utc": cutoff().isoformat(), "train_airports": airports,
+        "registry_sha256": registry.to_json(registry.build())["content_sha256"],
+        "params": {**PARAMS, "objective": "binary"}, "best_iteration": model.best_iteration,
+        "rows": len(preds), "status_counts": preds["status"].value_counts().to_dict(),
+        "dev_metrics_not_via_evaluator": metrics,
+    }  # fmt: skip
+    (run / "manifest.json").write_text(json.dumps(manifest, indent=2, default=str))
+    print(pd.DataFrame(metrics).round(4).to_string(index=False))
+    print(imp.nlargest(10, "gain").to_string(index=False))
+    return run
+
+
 if __name__ == "__main__":
-    argparse.ArgumentParser().parse_args()
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--task", choices=["throughput", "severe_delay"], default="throughput"
+    )
+    args = parser.parse_args()
+    main() if args.task == "throughput" else delay_main()
