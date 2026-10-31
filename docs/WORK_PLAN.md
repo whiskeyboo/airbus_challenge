@@ -31,8 +31,8 @@ This is a snapshot, not a live status feed. Recheck the linked PR and branch hea
 
 | Deliverable | Evidence / state | Remaining work |
 |---|---|---|
-| Source downloaders, flights, primary requests and labels | Merged [PR #3](https://github.com/whiskeyboo/airbus_challenge/pull/3); real artifacts generated | Additional cohorts, manifest integration, approved label-release policy |
-| Clear-weather reference and ratio in `airport_hourly` | Merged [PR #4](https://github.com/whiskeyboo/airbus_challenge/pull/4); 2023-only reference, all 48 cells supported | Ratio labels and evaluator/baseline contract; no new ratio labels exist yet |
+| Source downloaders, flights, requests and labels | PR #3 and Phase 2 cohort/ratio work in [PR #8](https://github.com/whiskeyboo/airbus_challenge/pull/8) merged; real four-cohort candidate generated | Agent 2 regenerates matching snapshots/lineage in the candidate directory; integrate the timing follow-up |
+| Clear-weather reference and ratio labels | Primary ratio labels generated; `p10-capacity/2` fits 14,035 complete benign training hours available by the cutoff, supporting all 48 cells | Agent 3 consumes the versioned ratio target; strict holdout cohorts intentionally omit airport-fitted ratios |
 | P10 and P12 | Accepted and recorded in `DECISIONS.md` | Keep their versions and exclusion evidence visible; do not request P10 approval again |
 | Weather tables and request-keyed weather snapshots | Merged on `main` at `9df015c`; processed snapshot/lineage files exist | Verify new cohorts, add demand, finish registry/provenance manifests and evaluate-only weather slices |
 | Snapshot lineage | Normalized `(snapshot_key, feature_group)` rows; predictions join through their snapshot row | Preserve that documented mapping; do not require an unnecessary per-prediction expansion |
@@ -58,10 +58,10 @@ Phases overlap where dependencies allow. Agent 3 can build model/product fixture
 
 ## Start here on the next agent turn
 
-- **Agent 1:** Phase 2 tasks `2-A1a`–`2-A1d`: settle cohort interfaces, add their requests/labels, agree the ratio-label extension, and prepare the schedule-only drift audit.
+- **Agent 1:** Phase 2 producer work `2-A1a`–`2-A1d` is implemented and generated. Candidate: `data/processed/candidates/agent1_phase2/` (20,337,984 requests; 40,313,856 labels; 45,360 hours; all `real`). `handoff.json` contains hashes, cohort roles and the Agent 2 command. Label schema 0.4.0 uses the disclosed `simulated-outcomes/1` timing; the existing ±2 min tolerance is retained. Schedule-only drift findings were completed before the lead stopped further audits; no additional auditor run was launched. Canonical feature/data bundles await coordinated integration.
 - **Agent 2:** `2-A2a`–`2-A2e`: verify the merged request snapshots, add schedule demand, separately gate simulated operations, complete the registry/manifests, and produce evaluation-only slices.
 - **Agent 3:** `2-A3a`–`2-A3b`, then `3-A3a`: verify PR #2's merged review fixes, arrange the required current-head audit when the lead lifts any applicable hold, and build flight baselines on fixtures in parallel.
-- **Lead/integrator:** resolve the still-pending entries linked from `DECISIONS.md`, track the data/feature task handoffs from Agents 1 and 2, and approve explicit cohort and fit-availability contracts. Coordinate with the teammate on Agent 3's audit/development evidence. P10/P12 are already settled.
+- **Lead/integrator:** track the Agent 2 candidate handoff and downstream WP-D5–WP-D7 decisions. P10/P12 and cohort/ratio contracts are accepted; WP-D1/WP-D2 implementation choices are recorded. Coordinate integration and manual PR merges with the teammate.
 
 ## Collaboration and delivery rules
 
