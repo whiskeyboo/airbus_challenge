@@ -116,3 +116,57 @@ def test_delay_scope_excludes_test_and_fit_reads_only_requested_train_labels(tmp
         "tr1",
         "tr2",
     ]  # Cancelled excluded; test never read.
+
+
+def test_cancellation_labels_are_train_requested_eligible_only(tmp_path):
+    path = tmp_path / "labels.parquet"
+    pd.DataFrame(
+        {
+            "prediction_id": ["tr1", "tr2", "unknown", "test1"],
+            "target_kind": train.CANCEL["target"],
+            "y_true": [1.0, 0.0, np.nan, 1.0],
+            "eligible": [True, True, False, True],
+        }
+    ).to_parquet(path)
+    got = train.training_labels(path, ["tr1", "tr2", "unknown"], train.CANCEL["target"])
+    assert list(got.prediction_id) == ["tr1", "tr2"]
+    assert train.CANCEL["model_version"] == "lgbm_cancellation_v1"
+
+
+def test_shap_drivers_top5_per_prediction_with_contract_columns():
+    rng = np.random.default_rng(0)
+    X = pd.DataFrame({f"f{i}": rng.normal(size=300) for i in range(8)})
+    y = (X.f0 + 0.5 * X.f1 > 0).astype(float)
+    model = train.fit(X[:200], y[:200], X[200:], y[200:], {"objective": "binary"})
+    ids = pd.Series([f"p{i}" for i in range(300)])
+    out = train.shap_drivers(model, X, ids, "cancellation", "log-odds")
+    assert list(out.columns) == ["prediction_id", "target_kind", "feature", "value",
+                                 "contribution", "contribution_scale"]  # fmt: skip
+    assert out.groupby("prediction_id").size().max() <= 5
+    first = out[out.prediction_id == "p0"]
+    assert first.contribution.abs().is_monotonic_decreasing
+    full = model.predict(X.iloc[:1], pred_contrib=True)[0]
+    assert np.isclose(first.contribution.iloc[0], full[:-1][np.abs(full[:-1]).argmax()])
+
+
+@pytest.mark.skipif(
+    not Path(
+        "/Users/kaiwen/airbus_challenge/artifacts/lgbm_dev/manifest.json"
+    ).exists(),
+    reason="no combined run",
+)
+def test_combined_run_has_three_targets_and_no_test_rows():
+    run = Path("/Users/kaiwen/airbus_challenge/artifacts/lgbm_dev")
+    preds = pd.read_parquet(
+        run / "predictions.parquet",
+        columns=["prediction_id", "target_kind", "target_start_utc", "as_of_utc"],
+    )
+    assert set(preds.target_kind) == {
+        "reporting_carrier_touchdowns",
+        "departure_delay_gt45",
+        "cancellation",
+    }
+    assert preds.target_start_utc.max() < pd.Timestamp("2025-01-01", tz="UTC")
+    assert (preds.as_of_utc >= train.cutoff()).all()
+    manifest = json.loads((run / "manifest.json").read_text())
+    assert pd.Timestamp(manifest["fit_cutoff_utc"]).tzinfo is not None
