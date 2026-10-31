@@ -437,11 +437,15 @@ def test_dashboard_data_reads_parquet_only_through_read():
     not REAL,
     reason="needs processed data and artifacts/baselines_dev (run airbus_challenge.baselines)",
 )
-def test_app_default_case_renders_and_does_not_load_outcomes(monkeypatch):
+def test_app_uses_current_rules_and_keeps_outcomes_hidden(monkeypatch):
     calls = []
     real = dd.load_replay_outcomes
     monkeypatch.setattr(
         dd, "load_replay_outcomes", lambda *a: calls.append(a) or real(*a)
+    )
+    monkeypatch.setattr(
+        dd, "load_advisories",
+        lambda *a: pytest.fail("A saved assessment may predate the current policy"),
     )
     at = AppTest.from_file(str(APP), default_timeout=60)
     at.run()

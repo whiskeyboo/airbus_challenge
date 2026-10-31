@@ -40,11 +40,6 @@ def forecast(run: str, icao: str, t: pd.Timestamp) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
-def advisories(run: str, icao: str, t: pd.Timestamp):
-    return dd.load_advisories(ROOT, run, icao, t)
-
-
-@st.cache_data(show_spinner=False)
 def run_rows(run: str, icao: str, t: pd.Timestamp) -> pd.DataFrame:
     return dd.load_run_rows(ROOT, run, icao, t)
 
@@ -219,10 +214,7 @@ with replay_tab:
                 },
                 expanded=False,
             )
-            saved = timed("advisories", advisories, run, icao, t)
-            if saved is not None:
-                st.caption("Saved assessment for this selection")
-                st.dataframe(saved, hide_index=True)
+            st.caption("This assessment uses the forecast set's current calibrated or provisional rules.")
         if rec["cancellation"] is None:
             st.caption("No cancellation predictions are available for this selection.")
 
