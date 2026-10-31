@@ -20,7 +20,7 @@ splits:
   test:        {start: "2025-01-01", end: "2025-08-01"}
 leave_one_airport_out: true
 
-# PROPOSED, not validated (docs/DECISIONS.md P10). Benign hours for the clear-weather ceiling, judged on METAR.
+# Accepted 2026-10-31 (docs/DECISIONS.md P10). Benign hours for the clear-weather ceiling, judged on METAR.
 clear_weather:
   min_ceiling_ft: 3000  # An hour with no ceiling also qualifies.
   min_visibility_sm: 5
