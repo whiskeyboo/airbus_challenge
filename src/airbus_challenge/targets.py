@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 
@@ -13,7 +14,8 @@ FLIGHTS = Path("data/processed/flights.parquet")
 REQUESTS = Path("data/processed/prediction_requests.parquet")
 HOURLY = Path("data/processed/airport_hourly.parquet")
 LABELS = Path("data/labels/labels.parquet")
-VERSION = "0.2.0"
+VERSION = "0.3.0"
+LABEL_VERSION = "0.2.0"
 METRICS = {
     "scheduled_departures": (
         "origin_icao",
@@ -315,8 +317,174 @@ def label_rows(requests, outcomes, hourly, threshold=45, data_mode="real"):
     )
     labels["availability_basis"] = "unknown"
     labels["label_source"] = "BTS On-Time Reporting Carrier"
-    labels["label_version"] = VERSION
+    labels["label_version"] = LABEL_VERSION
     return labels[LABEL_SCHEMA.names]
+
+
+def clear_weather_hours(weather, rule):
+    reports = weather.copy()
+    reports["hour_start_utc"] = reports.observed_at_utc.dt.floor("h")
+    codes_known = reports.wx_codes.map(pd.api.types.is_list_like)
+    codes_empty = reports.wx_codes.map(
+        lambda codes: len(codes) == 0 if pd.api.types.is_list_like(codes) else False
+    )
+    corrected = reports.quality_flags.map(lambda flags: "corrected" in flags)
+    ceiling_known = reports.ceiling_status.eq("none") | (
+        reports.ceiling_status.eq("layer") & reports.ceiling_ft.notna()
+    )
+    reports["weather_known"] = (
+        ceiling_known & reports.visibility_sm.notna() & codes_known & ~corrected
+    )
+    ceiling_ok = reports.ceiling_status.eq("none") | (
+        reports.ceiling_status.eq("layer")
+        & reports.ceiling_ft.ge(rule["min_ceiling_ft"])
+    )
+    reports["benign"] = (
+        reports.weather_known
+        & ceiling_ok
+        & reports.visibility_sm.ge(rule["min_visibility_sm"])
+    )
+    if not rule["allow_weather_codes"]:
+        reports["benign"] &= codes_empty
+    return reports.groupby(["airport_icao", "hour_start_utc"], as_index=False).agg(
+        metar_reports=("source_record_id", "size"),
+        benign=("benign", "all"),
+        weather_known=("weather_known", "all"),
+    )
+
+
+def add_capacity_ratio(hourly, weather, airports, experiment):
+    out = hourly.copy()
+    unknown = sorted(set(out.airport_icao) - set(airports))
+    if unknown:
+        raise ValueError(f"Capacity reference airport configuration missing: {unknown}")
+    out["airport_local_hour"] = pd.Series(pd.NA, index=out.index, dtype="Int32")
+    for icao, settings in airports.items():
+        ix = out.index[out.airport_icao.eq(icao)]
+        out.loc[ix, "airport_local_hour"] = (
+            out.loc[ix, "hour_start_utc"]
+            .dt.tz_convert(settings["timezone"])
+            .dt.hour.astype("Int32")
+        )
+    start = pd.Timestamp(experiment["splits"]["train"]["start"], tz="UTC")
+    end = pd.Timestamp(experiment["splits"]["train"]["end"], tz="UTC")
+    train_weather = weather[
+        weather.observed_at_utc.ge(start) & weather.observed_at_utc.lt(end)
+    ]
+    states = clear_weather_hours(train_weather, experiment["clear_weather"])
+    train = out[out.hour_start_utc.ge(start) & out.hour_end_utc.le(end)].merge(
+        states, on=["airport_icao", "hour_start_utc"], how="left", validate="one_to_one"
+    )
+    eligible = (
+        train.coverage_status.eq("complete_for_source_scope")
+        & train.n_unresolved.eq(0)
+        & train.reporting_carrier_touchdowns.notna()
+        & train.benign.fillna(False)
+    )
+    fit = train.loc[eligible].sort_values(["airport_icao", "hour_start_utc"])
+    reference = fit.groupby(["airport_icao", "airport_local_hour"]).agg(
+        clear_weather_p95_arrivals_per_hour=(
+            "reporting_carrier_touchdowns",
+            lambda values: float(values.quantile(0.95, interpolation="linear")),
+        ),
+        clear_weather_fit_hours=("reporting_carrier_touchdowns", "size"),
+    )
+    index = pd.MultiIndex.from_product(
+        [list(airports), range(24)], names=["airport_icao", "airport_local_hour"]
+    )
+    reference = reference.reindex(index).reset_index()
+    reference["clear_weather_fit_hours"] = reference.clear_weather_fit_hours.fillna(
+        0
+    ).astype("int32")
+    reference["airport_local_hour"] = reference.airport_local_hour.astype("Int32")
+    reference["clear_weather_p95_arrivals_per_hour"] = (
+        reference.clear_weather_p95_arrivals_per_hour.astype("float64")
+    )
+    contributors = train_weather.assign(
+        hour_start_utc=train_weather.observed_at_utc.dt.floor("h")
+    ).merge(
+        fit[["airport_icao", "hour_start_utc"]],
+        on=["airport_icao", "hour_start_utc"],
+        how="inner",
+        validate="many_to_one",
+    )
+    policy = {
+        "version": "p10-capacity/1",
+        "p10_status": "accepted by project lead, 2026-10-31, conversation approval",
+        "train_start_utc": start.isoformat(),
+        "train_end_exclusive_utc": end.isoformat(),
+        "grouping": ["airport_icao", "airport_local_hour"],
+        "airport_timezones": {icao: a["timezone"] for icao, a in airports.items()},
+        "weather_rule": experiment["clear_weather"],
+        "quantile": 0.95,
+        "interpolation": "linear",
+        "weather_hour_rule": "at least one report; every report must satisfy P10; missing weather and corrected reports reject the hour; observation-time bins; no future-weather join",
+        "throughput_fit_rule": "training hours only; complete_for_source_scope with zero unresolved arrivals",
+        "sparse_policy": "no pooling or imputation; expose fit-hour counts; zero/nonpositive references and missing groups yield null ratios",
+        "ratio_policy": "observed throughput divided by the frozen reference, without clipping; outcome-only historical throughput comparison, not measured physical capacity",
+    }
+    fit_rows = json.loads(
+        fit[
+            [
+                "airport_icao",
+                "hour_start_utc",
+                "airport_local_hour",
+                "reporting_carrier_touchdowns",
+            ]
+        ].to_json(orient="records", date_format="iso")
+    )
+    basis = {
+        "policy": policy,
+        "training_hours": fit_rows,
+        "weather_source_record_ids": sorted(contributors.source_record_id.tolist()),
+    }
+    reference_id = hashlib.sha256(
+        json.dumps(basis, sort_keys=True).encode()
+    ).hexdigest()
+    out = out.merge(
+        reference,
+        on=["airport_icao", "airport_local_hour"],
+        how="left",
+        sort=False,
+        validate="many_to_one",
+    )
+    denominator = out.clear_weather_p95_arrivals_per_hour
+    out["clear_weather_reference_id"] = reference_id
+    out["clear_weather_fit_end_utc"] = pd.Series(
+        end, index=out.index, dtype="datetime64[us, UTC]"
+    )
+    status = pd.Series("available", index=out.index, dtype="string")
+    status.loc[
+        ~out.throughput_label_eligible | out.reporting_carrier_touchdowns.isna()
+    ] = "throughput_unavailable"
+    status.loc[denominator.le(0)] = "nonpositive_reference"
+    status.loc[denominator.isna()] = "missing_reference"
+    out["capacity_ratio_status"] = status
+    ratio_name = experiment["targets"]["capacity_ratio"]
+    out[ratio_name] = (
+        out.reporting_carrier_touchdowns.astype("float64")
+        / denominator.where(denominator > 0)
+    ).where(status.eq("available"))
+    reference_records = (
+        reference.astype(object)
+        .where(reference.notna(), None)
+        .to_dict(orient="records")
+    )
+    report = {
+        **policy,
+        "reference_id": reference_id,
+        "reference": reference_records,
+        "fit_hours": len(fit),
+        "training_metar_reports": len(train_weather),
+        "fit_weather_records": len(contributors),
+        "training_weather_hours_missing_or_unknown": int(
+            (~train.weather_known.fillna(False).astype(bool)).sum()
+        ),
+        "training_benign_hours": int(train.benign.fillna(False).sum()),
+        "ratio_column": ratio_name,
+        "status_counts": status.value_counts().to_dict(),
+    }
+    return out, report
 
 
 def write_manifest(path, rows, sources, extra):
@@ -498,6 +666,22 @@ def build():
         for icao in config["airports"]
     ]
     hourly = pd.concat(frames, ignore_index=True)
+    weather = pd.read_parquet(
+        "data/processed/weather_observations.parquet",
+        columns=[
+            "airport_icao",
+            "observed_at_utc",
+            "wx_codes",
+            "ceiling_ft",
+            "visibility_sm",
+            "ceiling_status",
+            "quality_flags",
+            "source_record_id",
+        ],
+    )
+    hourly, capacity = add_capacity_ratio(
+        hourly, weather, config["airports"], experiment
+    )
     HOURLY.parent.mkdir(parents=True, exist_ok=True)
     tmp = HOURLY.with_name(".airport_hourly.parquet.tmp")
     table = pa.Table.from_pandas(hourly, preserve_index=False)
@@ -528,7 +712,10 @@ def build():
             )
             .to_dict(orient="records"),
             "source_scope": "BTS reporting-carrier flights with departure service months in the source manifest; excludes cancelled movements; diverted arrivals only when DivReachedDest=1",
-            "capacity_ratio_status": "deferred pending P10 approval",
+            "capacity_ratio": capacity,
+            "capacity_weather_sha256": sha256(
+                Path("data/processed/weather_observations.parquet")
+            ),
             "min_time_utc": start,
             "max_time_exclusive_utc": end,
             "counts_by_airport": hourly.groupby("airport_icao")[
@@ -538,16 +725,6 @@ def build():
             .to_dict(),
             "null_counts": hourly[list(METRICS)].isna().sum().to_dict(),
         },
-    )
-    weather = pd.read_parquet(
-        "data/processed/weather_observations.parquet",
-        columns=[
-            "airport_icao",
-            "observed_at_utc",
-            "wx_codes",
-            "ceiling_ft",
-            "visibility_sm",
-        ],
     )
     bias = exclusion_audit(hourly, flights, experiment, weather)
     outcomes = flights[["flight_id", "dep_delay_min", "cancelled", "scheduled_dep_utc"]]
@@ -623,6 +800,7 @@ def build():
         rows,
         manifest,
         {
+            "schema_version": LABEL_VERSION,
             "source_requests_sha256": request_manifest["parquet_sha256"],
             "summary": summary,
             "exclusion_counts": exclusion_counts,

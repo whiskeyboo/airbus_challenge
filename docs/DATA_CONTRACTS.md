@@ -130,6 +130,8 @@ Lineage is a separate long table:
 `feature_lineage(prediction_id, feature_name, source_record_id, contributing_available_at_utc, availability_basis, transform_version)`.
 Large rolling features can reference a hashed source partition and bounds if exact contributors remain reproducible.
 
+`features.py` writes `data/processed/feature_snapshots.parquet`, one row per `prediction_id` for both tasks, adding `snapshot_key` and `window_end_utc` (`target_end_utc`, or target start + 1 h for flights). Requests sharing (airport, as_of, target_start, window_end) share one `snapshot_key` and are computed once. Continuous features are float32 in this table (float64 in the interim file). `data/processed/feature_lineage.parquet` is keyed by `snapshot_key` and `feature_group`, not `prediction_id` and `feature_name`; join through `feature_snapshots.snapshot_key` to trace a prediction. `features.py` reads only the weather tables, their manifests, the request columns of `prediction_requests` and `configs/`; a test enforces this on every file open.
+
 Until `prediction_requests` exists, `features.py` writes `data/interim/weather_features_airport_hour.parquet` and `weather_features_lineage_airport_hour.parquet`, keyed by `(airport_icao, as_of_utc, target_start_utc, horizon_h)`. Requests join on that key to gain `prediction_id`. Lineage there is per `feature_group` (the `FEATURES` registry maps features to groups); `metar_window` rows reference a sha256 of the sorted contributor ids.
 
 Weather `reason_codes` (policies in `docs/DECISIONS.md` P13-P15):

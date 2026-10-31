@@ -11,7 +11,12 @@ from airbus_challenge.clean import (
     mark_sample,
 )
 
-CONFIG = {"airports": {"KATL": {"iata": "ATL"}, "KDFW": {"iata": "DFW"}}}
+CONFIG = {
+    "airports": {
+        "KATL": {"iata": "ATL", "timezone": "America/New_York"},
+        "KDFW": {"iata": "DFW", "timezone": "America/Chicago"},
+    }
+}
 SRC = {
     "key": "bts/fixture.zip",
     "sha256": "fixture",
@@ -523,7 +528,15 @@ def test_requests_and_targets_end_to_end_fixture(tmp_path, monkeypatch):
     experiment = {
         "horizons_h": [3, 6],
         "splits": {"train": {"start": "2023-01-15", "end": "2023-01-16"}},
-        "targets": {"severe_delay_threshold_min": 45},
+        "targets": {
+            "severe_delay_threshold_min": 45,
+            "capacity_ratio": "throughput_over_clear_weather_p95",
+        },
+        "clear_weather": {
+            "min_ceiling_ft": 3000,
+            "min_visibility_sm": 5,
+            "allow_weather_codes": False,
+        },
     }
     Path("configs/experiment.yaml").write_text(yaml.safe_dump(experiment))
     df = outcome_fixture(
@@ -551,6 +564,9 @@ def test_requests_and_targets_end_to_end_fixture(tmp_path, monkeypatch):
             "wx_codes": [["TSRA"]],
             "ceiling_ft": [900.0],
             "visibility_sm": [2.0],
+            "ceiling_status": ["layer"],
+            "quality_flags": [[]],
+            "source_record_id": ["fixture-weather-1"],
         }
     )
     weather.to_parquet("data/processed/weather_observations.parquet", index=False)
@@ -801,3 +817,185 @@ def test_missing_airport_hour_is_an_unapproved_exclusion_detail():
     )
     with pytest.raises(ValueError, match="missing_airport_hour"):
         label_rows(requests, pd.DataFrame(), hourly, data_mode="fixture")
+
+
+CAPACITY_EXPERIMENT = {
+    "splits": {"train": {"start": "2023-01-01", "end": "2024-01-01"}},
+    "targets": {"capacity_ratio": "throughput_over_clear_weather_p95"},
+    "clear_weather": {
+        "min_ceiling_ft": 3000,
+        "min_visibility_sm": 5,
+        "allow_weather_codes": False,
+    },
+}
+
+
+def capacity_fixture(events):
+    hourly = pd.DataFrame(
+        events,
+        columns=["airport_icao", "hour_start_utc", "reporting_carrier_touchdowns"],
+    )
+    hourly["hour_start_utc"] = pd.to_datetime(hourly.hour_start_utc, utc=True)
+    hourly["hour_end_utc"] = hourly.hour_start_utc + pd.Timedelta(hours=1)
+    hourly["throughput_label_eligible"] = hourly.reporting_carrier_touchdowns.notna()
+    hourly["coverage_status"] = "complete_for_source_scope"
+    hourly["n_unresolved"] = 0
+    hourly["data_mode"] = "fixture"
+    weather = (
+        hourly[["airport_icao", "hour_start_utc"]]
+        .rename(columns={"hour_start_utc": "observed_at_utc"})
+        .copy()
+    )
+    weather["observed_at_utc"] += pd.Timedelta(minutes=30)
+    weather["source_record_id"] = [f"weather-{i}" for i in weather.index]
+    weather["ceiling_status"] = "layer"
+    weather["ceiling_ft"] = 3000.0
+    weather["visibility_sm"] = 5.0
+    weather["wx_codes"] = [[] for _ in weather.index]
+    weather["quality_flags"] = [[] for _ in weather.index]
+    return hourly, weather
+
+
+@pytest.mark.parametrize(
+    ("changes", "expected"),
+    [
+        ({}, True),
+        ({"ceiling_ft": 2999.0}, False),
+        ({"visibility_sm": 4.99}, False),
+        ({"ceiling_ft": None, "ceiling_status": "none"}, True),
+        ({"ceiling_ft": None, "ceiling_status": "missing"}, False),
+        ({"visibility_sm": None}, False),
+        ({"wx_codes": ["TSRA"]}, False),
+        ({"wx_codes": None}, False),
+        ({"quality_flags": ["corrected"]}, False),
+    ],
+)
+def test_p10_weather_boundaries_and_missingness(changes, expected):
+    from airbus_challenge.targets import clear_weather_hours
+
+    _, weather = capacity_fixture([("KATL", "2023-01-01T15:00Z", 10)])
+    for name, value in changes.items():
+        weather.at[0, name] = value
+    state = clear_weather_hours(weather, CAPACITY_EXPERIMENT["clear_weather"]).iloc[0]
+    assert bool(state.benign) == expected
+
+
+def test_p10_hour_requires_all_reports_to_be_benign():
+    from airbus_challenge.targets import clear_weather_hours
+
+    _, weather = capacity_fixture(
+        [("KATL", "2023-01-01T15:00Z", 10), ("KATL", "2023-01-01T15:00Z", 10)]
+    )
+    weather.at[1, "visibility_sm"] = 1.0
+    state = clear_weather_hours(weather, CAPACITY_EXPERIMENT["clear_weather"]).iloc[0]
+    assert state.metar_reports == 2
+    assert not state.benign
+
+
+def test_capacity_reference_train_only_and_future_weather_invariance():
+    from airbus_challenge.targets import add_capacity_ratio
+
+    hourly, weather = capacity_fixture(
+        [
+            ("KATL", "2023-01-01T15:00Z", 10),
+            ("KATL", "2023-01-02T15:00Z", 20),
+            ("KATL", "2023-01-03T15:00Z", 1000),
+            ("KATL", "2024-01-01T15:00Z", 30),
+            ("KATL", "2025-01-01T15:00Z", 40),
+        ]
+    )
+    weather.at[2, "wx_codes"] = ["TSRA"]
+    before, report = add_capacity_ratio(
+        hourly, weather, CONFIG["airports"], CAPACITY_EXPERIMENT
+    )
+    assert before.clear_weather_p95_arrivals_per_hour.tolist() == [19.5] * 5
+    assert before.clear_weather_fit_hours.tolist() == [2] * 5
+    assert before.iloc[3].throughput_over_clear_weather_p95 == 30 / 19.5
+    assert (
+        before.iloc[3].throughput_over_clear_weather_p95 > 1
+    )  # A percentile is not a hard upper bound.
+    assert report["fit_hours"] == 2
+    hourly.loc[3:, "reporting_carrier_touchdowns"] = 999999
+    weather.loc[3:, "ceiling_ft"] = 0
+    weather.loc[3:, "source_record_id"] = "changed-future-source"
+    weather.loc[3:, "visibility_sm"] = 0
+    after, changed_report = add_capacity_ratio(
+        hourly, weather, CONFIG["airports"], CAPACITY_EXPERIMENT
+    )
+    columns = [
+        "clear_weather_p95_arrivals_per_hour",
+        "clear_weather_fit_hours",
+        "clear_weather_reference_id",
+    ]
+    pd.testing.assert_frame_equal(before[columns], after[columns])
+    assert report["reference_id"] == changed_report["reference_id"]
+    assert report["reference"] == changed_report["reference"]
+
+
+def test_capacity_reference_local_hour_dst_and_airport_separation():
+    from airbus_challenge.targets import add_capacity_ratio
+
+    hourly, weather = capacity_fixture(
+        [
+            ("KATL", "2023-01-01T15:00Z", 10),
+            ("KATL", "2023-07-01T14:00Z", 20),
+            ("KDFW", "2023-01-01T16:00Z", 100),
+            ("KDFW", "2023-07-01T15:00Z", 200),
+        ]
+    )
+    out, _ = add_capacity_ratio(
+        hourly, weather, CONFIG["airports"], CAPACITY_EXPERIMENT
+    )
+    assert out.airport_local_hour.tolist() == [10] * 4
+    assert out.clear_weather_p95_arrivals_per_hour.tolist() == [
+        19.5,
+        19.5,
+        195.0,
+        195.0,
+    ]
+
+
+def test_capacity_reference_unsupported_and_zero_cases():
+    from airbus_challenge.targets import add_capacity_ratio
+
+    hourly, weather = capacity_fixture(
+        [
+            ("KATL", "2023-01-01T15:00Z", 0),
+            ("KATL", "2024-01-01T15:00Z", 5),
+            ("KATL", "2024-01-01T16:00Z", 5),
+        ]
+    )
+    out, _ = add_capacity_ratio(
+        hourly, weather, CONFIG["airports"], CAPACITY_EXPERIMENT
+    )
+    assert out.capacity_ratio_status.tolist() == [
+        "nonpositive_reference",
+        "nonpositive_reference",
+        "missing_reference",
+    ]
+    assert out.throughput_over_clear_weather_p95.isna().all()
+    assert out.clear_weather_fit_hours.tolist() == [1, 1, 0]
+
+
+def test_capacity_reference_rejects_partial_training_and_missing_targets():
+    from airbus_challenge.targets import add_capacity_ratio
+
+    hourly, weather = capacity_fixture(
+        [
+            ("KATL", "2023-01-01T15:00Z", 10),
+            ("KATL", "2023-01-02T15:00Z", 1000),
+            ("KATL", "2024-01-01T15:00Z", None),
+            ("KATL", "2025-01-01T15:00Z", 0),
+        ]
+    )
+    hourly.loc[1, "coverage_status"] = "partial"
+    hourly.loc[1, "n_unresolved"] = 1
+    out, _ = add_capacity_ratio(
+        hourly, weather, CONFIG["airports"], CAPACITY_EXPERIMENT
+    )
+    assert out.clear_weather_p95_arrivals_per_hour.eq(10).all()
+    assert out.clear_weather_fit_hours.eq(1).all()
+    assert out.capacity_ratio_status.iloc[2] == "throughput_unavailable"
+    assert pd.isna(out.throughput_over_clear_weather_p95.iloc[2])
+    assert out.capacity_ratio_status.iloc[3] == "available"
+    assert out.throughput_over_clear_weather_p95.iloc[3] == 0
