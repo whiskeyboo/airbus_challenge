@@ -50,6 +50,8 @@ Use actual denominators. Conditional severe-delay probabilities must not be desc
 
 ## 4. Weather and event slices
 
+Slice source: `data/processed/eval_weather_slices.parquet` from `slices.py` (`eval-weather-slices/0.1.0`), one row per airport and UTC hour from realised METARs observed in that hour, in hindsight and including corrected reports. `thunderstorm`: any weather code containing TS, including VCTS. `ifr`: ceiling below 1,000 ft or visibility below 3 sm. `low_vis`: visibility below 1 sm. `strong_crosswind`: crosswind of 20 kt or more, variable wind at full speed. Hours with no METAR have `coverage = missing`. Evaluation only: it is never a predictor, and `registry.model_inputs` refuses its columns.
+
 Evaluate all eligible hours first. Add prespecified slices for high/low demand, relevant weather regimes, forecast age, missingness, season, and airport. Observed target weather and final storm events are allowed for retrospective slicing, never for features.
 
 Build a versioned event definition before tuning: event type, airport spatial association, onset/offset, merging gap, and minimum duration. County reports are not automatically airport observations. Keep uncertainty in storm location/timing visible.
