@@ -6,7 +6,7 @@ This is the authoritative register for decisions that change scientific meaning 
 
 | ID | Requirement | Basis |
 | --- | --- | --- |
-| R01 | Single-agent workflow governed by `CLAUDE.md`; three-agent plan archived in `docs/archive/` | User decision, 2026-10-31 |
+| R01 | Single-agent workflow governed by `CLAUDE.md`; three-agent plan removed (see commit 066be0d) | User decision, 2026-10-31 |
 | R02 | Ample time; prioritise a comprehensive, rigorous project | User instruction |
 | R03 | ATL and DFW; headings 80 and 180 degrees | Challenge 5 brief, pages 5-6 |
 | R04 | Forecast 3-12 hours ahead; use 3/6/9/12 as planned horizons | Brief plus reviewed plan |

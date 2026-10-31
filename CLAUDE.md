@@ -2,7 +2,7 @@
 
 Hackathon: Autonomous SG 2026 (AI & Aerospace track). Forecast hourly arrival throughput (AAR proxy) and severe departure-delay risk (>45 min) 3–12 h ahead for KATL and KDFW.
 
-Brief and rubric: `docs/challenge5.md`. Detailed reference specs in `docs/` (PROJECT_SPEC, TEMPORAL_RULES, DATA_CONTRACTS, EVALUATION_PLAN, SOURCES, DECISIONS). If they conflict with this file, this file wins. `docs/archive/` is an unused three-agent plan; ignore it.
+Brief and rubric: `docs/challenge5.md`. Detailed reference specs in `docs/` (PROJECT_SPEC, TEMPORAL_RULES, DATA_CONTRACTS, EVALUATION_PLAN, SOURCES, DECISIONS). If they conflict with this file, this file wins.
 Splits, horizons and targets: `configs/experiment.yaml`. Airports, headings, timezones, weather stations: `configs/airports.yaml`.
 
 ## Data sources
