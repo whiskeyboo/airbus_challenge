@@ -610,6 +610,25 @@ def test_requests_and_targets_end_to_end_fixture(tmp_path, monkeypatch, all_coho
     assert len(manifest["exclusion_audit"]["threshold_sensitivity"]) == 6
     assert manifest["data_mode"] == "fixture"
     assert sum(r["rows"] for r in manifest["exclusion_counts"]) == len(labels)
+    denominator_path = targets.LABELS.with_name("label_denominators.parquet")
+    denominators = pd.read_parquet(denominator_path)
+    assert denominators.rows.sum() == len(labels)
+    assert manifest["label_denominators_sha256"] == sha256(denominator_path)
+    denominator_manifest = json.loads(
+        denominator_path.with_suffix(".manifest.json").read_text()
+    )
+    assert denominator_manifest["source_labels_sha256"] == manifest["parquet_sha256"]
+    assert denominator_manifest["label_rows"] == len(labels)
+    delay_counts = denominators[
+        denominators.target_kind.eq("departure_delay_gt45")
+        & denominators.cohort_version.eq(requests.COHORT_VERSION)
+    ]
+    assert delay_counts.loc[delay_counts.eligible, "rows"].sum() == 4
+    assert (
+        delay_counts.loc[delay_counts.exclusion_reason.eq("cancelled"), "rows"].sum()
+        == 2
+    )
+    assert denominators.data_mode.eq("fixture").all()
     assert {r["task"] for r in manifest["exclusion_counts"]} == {
         "throughput",
         "severe_delay",
@@ -1384,3 +1403,50 @@ def test_negative_simulated_label_latency_is_rejected():
 
     with pytest.raises(ValueError, match="Negative"):
         label_timing({**LABEL_AVAILABILITY, "departure_latency_min": -1})
+
+
+def test_label_denominators_use_target_split_and_preserve_partial_eligibility():
+    from airbus_challenge.targets import label_denominators
+
+    requests = pd.DataFrame(
+        {
+            "prediction_id": ["train", "partial-ok", "partial-excluded"],
+            "cohort_version": ["retrospective_schedule_v1"] * 3,
+            "task": ["throughput"] * 3,
+            "airport_icao": ["KATL"] * 3,
+            "target_start_utc": pd.to_datetime(
+                [
+                    "2023-12-31T23:00Z",
+                    "2024-01-01T00:00Z",
+                    "2024-01-01T01:00Z",
+                ]
+            ),
+            "horizon_h": [3, 6, 6],
+        }
+    )
+    labels = pd.DataFrame(
+        {
+            "prediction_id": requests.prediction_id,
+            "target_kind": ["reporting_carrier_touchdowns"] * 3,
+            "eligible": [True, True, False],
+            "exclusion_reason": [None, None, "coverage_incomplete"],
+            "exclusion_detail": [None, None, "unresolved_arrival_fraction_gt_0.05"],
+            "data_mode": ["fixture"] * 3,
+        }
+    )
+    experiment = {
+        "splits": {
+            "train": {"start": "2023-01-01", "end": "2024-01-01"},
+            "validation": {"start": "2024-01-01", "end": "2024-07-01"},
+        }
+    }
+    counts = label_denominators(requests, labels, experiment)
+    assert counts.rows.sum() == 3
+    validation = counts[counts.split.eq("validation")]
+    assert validation.rows.sum() == 2
+    assert validation.loc[validation.eligible, "rows"].sum() == 1
+    assert validation.target_month.eq("2024-01").all()
+    assert validation.horizon_h.eq(6).all()
+    assert counts.loc[counts.eligible, "exclusion_reason"].isna().all()
+    with pytest.raises(ValueError, match="unknown prediction_id"):
+        label_denominators(requests.iloc[:2], labels, experiment)
