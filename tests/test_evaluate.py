@@ -12,6 +12,7 @@ from airbus_challenge.baselines import (
     SOURCE_PATHS,
     TARGET,
 )
+from airbus_challenge.download import sha256
 from airbus_challenge.evaluate import (
     CAPACITY_RATIO,
     CLIMATOLOGY,
@@ -38,7 +39,6 @@ from airbus_challenge.evaluate import (
     check_label_keys,
     check_locked_candidates,
     check_requests,
-    check_same_rows,
     classification_metrics,
     evaluate_target,
     join_labels,
@@ -50,6 +50,7 @@ from airbus_challenge.evaluate import (
     regression_metrics,
     reliability,
     required_baselines,
+    scoring_scope,
     skill_metrics,
     squared_errors,
     worst_misses,
@@ -746,24 +747,29 @@ def test_a_prediction_with_no_request_is_refused():
         check_requests(table, requests_of(table).iloc[1:])
 
 
+def scope_of(table: pd.DataFrame, requests: pd.DataFrame, cutoffs=None):
+    table = table.assign(split=evaluate.split_of(table["target_start_utc"]))
+    if "run" not in table:
+        table = table.assign(run="run")
+    return scoring_scope(table, requests, cutoffs or {"run": ts(FIT_CUTOFF)})
+
+
 def test_a_model_cannot_drop_requests_it_could_not_score():
-    table = throughput_table().assign(split="validation")
+    table = throughput_table()
     dropped = table[
         table["model_version"].ne(MODEL) | table["target_start_utc"].eq(ts(DAY_ONE))
     ]
     with pytest.raises(ValueError, match=f"{MODEL} has no"):
-        check_requests(dropped, requests_of(table))
+        scope_of(dropped, requests_of(table))
 
 
 def test_marking_a_request_unavailable_satisfies_the_check():
-    table = predictions_for("KATL", [DAY_ONE, DAY_TWO], {MODEL: [1.0, np.nan]}).assign(
-        split="validation"
-    )
-    check_requests(table, requests_of(table))
+    table = predictions_for("KATL", [DAY_ONE, DAY_TWO], {MODEL: [1.0, np.nan]})
+    scope_of(table, requests_of(table))
 
 
 def test_requests_outside_the_scored_scope_are_not_expected():
-    table = throughput_table().assign(split="validation")
+    table = throughput_table()
     other = predictions_for(
         "KATL",
         [TEST_DAY, "2024-01-01 02:00", "2024-09-01 15:00"],
@@ -772,7 +778,7 @@ def test_requests_outside_the_scored_scope_are_not_expected():
     requests = pd.concat([requests_of(table), requests_of(other)], ignore_index=True)
     # 2024-01-01 02:00 was issued before the fit cutoff, so nothing should score it.
     requests = requests[requests["target_start_utc"].ne(ts("2024-09-01 15:00"))]
-    check_requests(table, requests)
+    scope_of(table, requests)
 
 
 @pytest.mark.parametrize(
@@ -926,14 +932,24 @@ def write_run(
         table.drop(columns=["split", "day", "run"], errors="ignore"),
         root / run / "predictions.parquet",
     )
+    requests = root.parent / "requests.parquet"
     manifest = {
         "run_id": run,
         "data_mode": table["data_mode"].iloc[0],
         "commit_dirty": dirty,
         "fit_cutoff_utc": FIT_CUTOFF,
+        "prediction_requests_sha256": sha256(requests) if requests.exists() else None,
         **manifest,
     }
     (root / run / "manifest.json").write_text(json.dumps(manifest))
+
+
+def rebind(inputs: list) -> None:
+    # A test that rewrites the requests table re-binds every run manifest to it.
+    for path in inputs[2].glob("*/manifest.json"):
+        manifest = json.loads(path.read_text())
+        manifest["prediction_requests_sha256"] = sha256(inputs[1])
+        path.write_text(json.dumps(manifest))
 
 
 @pytest.mark.parametrize(
@@ -961,10 +977,10 @@ def clean_git(monkeypatch):
 
 def run_inputs(table: pd.DataFrame, labels: pd.DataFrame, tmp_path) -> list:
     artifacts = tmp_path / "artifacts"
-    write_run(table, artifacts)
-    labels_path = write_labels(labels, tmp_path)
     requests_path = tmp_path / "requests.parquet"
     requests_of(table).to_parquet(requests_path)
+    write_run(table, artifacts)
+    labels_path = write_labels(labels, tmp_path)
     return [
         labels_path,
         requests_path,
@@ -1026,6 +1042,7 @@ def test_main_runs_every_check_before_scoring(tmp_path, clean_git, change, messa
     inputs = run_inputs(changed, changed_labels, tmp_path)
     requests = requests_of(table).assign(data_mode=changed["data_mode"].iloc[0])
     requests.to_parquet(inputs[1])
+    rebind(inputs)
     with pytest.raises(ValueError, match=message):
         main(["run"], *inputs)
     assert not inputs[3].exists()
@@ -1172,6 +1189,7 @@ MANIFEST = {"fit_cutoff_utc": FIT_CUTOFF}
 )
 def test_locked_run_reads_each_run_manifest(tmp_path, clean_git, manifest, message):
     inputs = locked_inputs(tmp_path)
+    manifest = {**manifest, "prediction_requests_sha256": sha256(inputs[1])}
     (inputs[2] / "run" / "manifest.json").write_text(json.dumps(manifest))
     with pytest.raises(ValueError, match=message):
         locked_run(inputs)
@@ -1304,13 +1322,13 @@ def test_a_duplicate_request_id_is_refused():
 
 
 def test_scope_keeps_other_tasks_and_cohorts_apart():
-    table = throughput_table().assign(split="validation")
+    table = throughput_table()
     other = requests_of(predictions_for("KDFW", [DAY_ONE], {MODEL: [1.0]}))
     extra = pd.concat(
         [other.assign(task="other_task"), other.assign(cohort_version="csv_only_v1")],
         ignore_index=True,
     ).assign(prediction_id=lambda d: "other-" + d.index.astype(str))
-    check_requests(table, pd.concat([requests_of(table), extra], ignore_index=True))
+    scope_of(table, pd.concat([requests_of(table), extra], ignore_index=True))
 
 
 def test_labels_are_checked_after_requests_in_a_dev_run(
@@ -1319,6 +1337,7 @@ def test_labels_are_checked_after_requests_in_a_dev_run(
     table = throughput_table()
     inputs = run_inputs(table, labels_for(table, [10.0, 20.0]), tmp_path)
     requests_of(table).iloc[1:].to_parquet(inputs[1])
+    rebind(inputs)
 
     def never(*args):
         raise AssertionError("labels were read before the requests check")
@@ -1347,6 +1366,7 @@ def test_input_defects_never_spend_the_locked_run(tmp_path, clean_git, breakage)
     changed, changed_labels, requests = breakage(table, labels, requests_of(table))
     inputs = run_inputs(changed, changed_labels, tmp_path)
     requests.to_parquet(inputs[1])
+    rebind(inputs)
     with pytest.raises(ValueError):
         locked_run(inputs)
     assert_nothing_happened(inputs)
@@ -1704,13 +1724,13 @@ def test_severe_delay_needs_its_own_baselines():
 
 
 def test_models_and_baselines_share_one_scored_row_set():
-    table = throughput_table().assign(split="validation")
-    check_same_rows(table)
-    # A model scoring a request the baselines dropped has a different fit cutoff.
-    extra = table[table["model_version"].eq(MODEL)].head(1)
-    extra = extra.assign(prediction_id="issued-before-cutoff")
-    with pytest.raises(ValueError, match="different rows"):
-        check_same_rows(pd.concat([table, extra], ignore_index=True))
+    table = throughput_table()
+    scope_of(table, requests_of(table))
+    # A request only the candidate scores leaves the baselines short of it.
+    extra = predictions_for("KATL", ["2024-03-07 15:00"], {MODEL: [1.0]})
+    everything = pd.concat([table, extra], ignore_index=True)
+    with pytest.raises(ValueError, match=f"{CLIMATOLOGY} has no"):
+        scope_of(everything, requests_of(everything))
 
 
 # Re-review: fit cutoffs, common support and main-level checks
@@ -1738,9 +1758,9 @@ def test_every_run_declares_a_fit_cutoff(tmp_path, clean_git, cutoff, message):
         main(["run"], *inputs)
 
 
-def test_main_refuses_a_candidate_scoring_rows_the_baselines_lack(tmp_path, clean_git):
+def test_rows_before_the_scope_are_dropped_not_scored(tmp_path, clean_git):
     # An earlier cutoff lets the candidate score a request issued before the
-    # scored scope, which the baselines skip, so skill would mix row sets.
+    # end of train; it is dropped, so skill compares one row set.
     table = throughput_table()
     early = predictions_for("KATL", ["2024-01-01 02:00"], {MODEL: [5.0]})
     everything = pd.concat([table, early], ignore_index=True)
@@ -1749,10 +1769,21 @@ def test_main_refuses_a_candidate_scoring_rows_the_baselines_lack(tmp_path, clea
         table[~is_model], labels_for(everything, [10.0, 20.0, 5.0]), tmp_path
     )
     requests_of(everything).to_parquet(inputs[1])
+    rebind(inputs)
     candidate = pd.concat([table[is_model], early], ignore_index=True)
     write_run(candidate, inputs[2], "model", fit_cutoff_utc="2023-12-01T00:00:00+00:00")
-    with pytest.raises(ValueError, match="different rows"):
-        main(["run", "model"], *inputs)
+    report = json.loads(main(["run", "model"], *inputs).read_text())
+    (scope,) = report["scoring_scope"]
+    assert scope["fit_cutoff_utc"] == "2024-01-01T00:00:00Z"
+    assert scope["set_by"] == ["run"]
+    assert scope["rows_dropped"] == {MODEL: 1, PERSISTENCE: 0, CLIMATOLOGY: 0}
+    assert scope["rows_scored"] == 2
+    pooled = [
+        r
+        for r in report["metrics"]
+        if r["airport"] == "pooled" and r["horizon"] == "all" and r["metric"] == "rmse"
+    ]
+    assert {r["n_predicted"] for r in pooled if r["slice"] == "own_support"} == {2}
 
 
 def test_main_refuses_a_requests_table_with_mixed_data_modes(tmp_path, clean_git):
@@ -1762,6 +1793,7 @@ def test_main_refuses_a_requests_table_with_mixed_data_modes(tmp_path, clean_git
     stray = requests_of(predictions_for("KDFW", ["2023-06-01 15:00"], {MODEL: [1.0]}))
     stray = stray.assign(prediction_id="real-request", data_mode="real")
     pd.concat([requests_of(table), stray], ignore_index=True).to_parquet(inputs[1])
+    rebind(inputs)
     with pytest.raises(ValueError, match="mixed data_mode"):
         main(["run"], *inputs)
 
@@ -1804,3 +1836,102 @@ def test_pooled_reliability_compares_one_row_set():
         n[b["model"], b["airport"]] = n.get((b["model"], b["airport"]), 0) + b["n"]
     assert set(n.values()) == {1}
     assert {model for model, _ in n} == {MODEL, CONDITIONAL_RATE, LOGISTIC}
+
+
+# 2-A3b: fit-cutoff scoring scope and the requests binding
+
+REFIT = "2024-07-01T00:00:00+00:00"
+BEFORE_REFIT = "2024-07-01 01:00"  # issued 2024-06-30 22:00 at 3 h
+AFTER_REFIT = "2024-07-02 15:00"
+
+
+def refit_inputs(tmp_path, extra=()) -> tuple[list, pd.DataFrame]:
+    targets = [DAY_ONE, BEFORE_REFIT, AFTER_REFIT, *extra]
+    n = len(targets)
+    base = predictions_for(
+        "KATL", targets, {PERSISTENCE: [9.0] * n, CLIMATOLOGY: [11.0] * n}
+    )
+    inputs = run_inputs(base, labels_for(base, [10.0] * n), tmp_path)
+    candidate = predictions_for("KATL", [AFTER_REFIT], {MODEL: [10.5]})
+    write_run(candidate, inputs[2], "model", fit_cutoff_utc=REFIT)
+    return inputs, candidate
+
+
+def test_a_later_refit_gets_its_own_scope(tmp_path, clean_git, monkeypatch):
+    # A truthful train + validation refit declares its real cutoff and is scored
+    # only from there; validation has nothing left and reports null.
+    inputs, candidate = refit_inputs(tmp_path)
+    load = evaluate.load_labels
+    seen = []
+    monkeypatch.setattr(
+        evaluate, "load_labels", lambda path, ids: seen.extend(ids) or load(path, ids)
+    )
+    report = json.loads(main(["run", "model"], *inputs).read_text())
+    assert seen == [candidate["prediction_id"].iloc[0]]
+    scope = {s["split"]: s for s in report["scoring_scope"]}
+    assert scope["validation"]["rows_scored"] == 0
+    assert scope["validation"]["reason"] == "no_rows_after_fit_cutoff"
+    assert scope["validation"]["rows_dropped"] == {
+        MODEL: 0,
+        PERSISTENCE: 1,
+        CLIMATOLOGY: 1,
+    }
+    assert scope["calibration"]["fit_cutoff_utc"] == "2024-07-01T00:00:00Z"
+    assert scope["calibration"]["set_by"] == ["model"]
+    assert scope["calibration"]["rows_dropped"][PERSISTENCE] == 1
+    assert scope["calibration"]["rows_scored"] == 1
+    validation = [r for r in report["metrics"] if r["split"] == "validation"]
+    assert {r["model"] for r in validation} == {MODEL, PERSISTENCE, CLIMATOLOGY}
+    assert {r["value"] for r in validation} == {None}
+    assert {r["reason"] for r in validation} == {"no_rows_after_fit_cutoff"}
+    calibration = [
+        r
+        for r in report["metrics"]
+        if r["split"] == "calibration" and r["metric"] == "rmse"
+    ]
+    assert {r["n_predicted"] for r in calibration if r["slice"] == "own_support"} == {1}
+
+
+def test_a_refit_must_still_cover_its_own_scope(tmp_path, clean_git):
+    inputs, _ = refit_inputs(tmp_path, extra=["2024-07-03 15:00"])
+    with pytest.raises(ValueError, match=f"{MODEL} has no"):
+        main(["run", "model"], *inputs)
+    assert not inputs[3].exists()
+
+
+@pytest.mark.parametrize("manifest", [{"prediction_requests_sha256": None}, {}])
+def test_a_run_built_from_other_requests_is_refused(tmp_path, clean_git, manifest):
+    table = throughput_table()
+    inputs = run_inputs(table, labels_for(table, [10.0, 20.0]), tmp_path)
+    if manifest:
+        write_run(table, inputs[2], **manifest)
+    else:
+        # The same predictions, but the requests table changed after the run.
+        extra = requests_of(predictions_for("KDFW", [DAY_ONE], {MODEL: [1.0]}))
+        pd.concat([requests_of(table), extra]).to_parquet(inputs[1])
+    with pytest.raises(ValueError, match="another prediction requests table"):
+        main(["run"], *inputs)
+    assert not inputs[3].exists()
+
+
+def test_a_baseline_cannot_narrow_the_locked_scope(tmp_path, clean_git):
+    table = real_test_table()
+    is_model = table["model_version"].eq(MODEL)
+    inputs = locked_inputs(tmp_path, table[is_model])
+    write_run(
+        table[~is_model], inputs[2], "baselines", fit_cutoff_utc="2025-02-01T00:00:00Z"
+    )
+    with pytest.raises(ValueError, match="narrow the locked scope"):
+        locked_run(inputs, runs=("run", "baselines"))
+    assert_nothing_happened(inputs)
+
+
+def test_dropped_rows_cannot_change_the_locked_hash(tmp_path, clean_git):
+    table = real_test_table()
+    early = predictions_for("KATL", ["2025-01-01 01:00"], {MODEL: [3.0]})
+    padded = pd.concat([table, early.assign(data_mode="real")], ignore_index=True)
+    padded = padded.assign(split=evaluate.split_of(padded["target_start_utc"]))
+    scoped = padded[padded["as_of_utc"].ge(ts("2025-01-01"))]
+    assert candidate_sha256(scoped) == candidate_sha256(
+        table.assign(split=evaluate.split_of(table["target_start_utc"]))
+    )

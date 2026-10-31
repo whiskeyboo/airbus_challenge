@@ -93,6 +93,7 @@ METRIC_DEFINITIONS = {
 
 SPLITS = ("validation", "calibration", "test")
 SCOPE = ["split", "cohort_version", "target_kind"]
+SCOPE_KEY = ["task", "cohort_version", "target_kind"]
 CELL = [*SCOPE, "airport_icao", "horizon_h"]
 POOLED = "pooled"
 MACRO = "macro"
@@ -195,33 +196,60 @@ def check_requests(predictions: pd.DataFrame, requests: pd.DataFrame) -> None:
     stray = matched[matched["_merge"].ne("both")]
     if len(stray):
         raise ValueError(f"no matching request for {stray['prediction_id'].iloc[0]}")
-    # In scope from the end of train (contract §6); each run's own cutoff is
-    # checked in check_fit_cutoffs.
-    expected = requests[requests["as_of_utc"].ge(split_bounds("train")[1])]
-    expected = expected.assign(split=split_of(expected["target_start_utc"]))
-    keys = ["split", "task", "cohort_version", "target_kind", "model_version"]
-    for (split, task, cohort, target, model), frame in predictions.groupby(keys):
-        scope = (
-            expected["split"].eq(split)
-            & expected["task"].eq(task)
-            & expected["cohort_version"].eq(cohort)
+
+
+def scoring_scope(
+    predictions: pd.DataFrame,
+    requests: pd.DataFrame,
+    cutoffs: dict[str, pd.Timestamp],
+) -> tuple[pd.DataFrame, list[dict]]:
+    # Rows issued before the latest fit cutoff among a target's runs would be
+    # in-sample for that run, so they are dropped for every model, baselines too.
+    # Every model must then cover every in-scope request (contract §6); with
+    # check_requests and the drop, each model scores exactly the same rows.
+    train_end = split_bounds("train")[1]
+    requests = requests.assign(split=split_of(requests["target_start_utc"]))
+    keep = pd.Series(False, index=predictions.index)
+    scope = []
+    for (task, cohort, target), group in predictions.groupby(SCOPE_KEY):
+        runs = sorted(group["run"].unique())
+        floor = max([train_end, *(cutoffs[r] for r in runs)])
+        kept = group["as_of_utc"].ge(floor)
+        keep[group.index] = kept
+        models = sorted(group["model_version"].unique())
+        in_scope = (
+            requests["task"].eq(task)
+            & requests["cohort_version"].eq(cohort)
+            & requests["as_of_utc"].ge(floor)
         )
-        wanted = expected.loc[scope.fillna(False), "prediction_id"]
-        absent = wanted[~wanted.isin(frame["prediction_id"])]
-        if len(absent):
-            raise ValueError(
-                f"{model} has no {target} row for {absent.iloc[0]}; "
-                "a request it cannot score must be marked unavailable"
+        for split in sorted(group["split"].unique()):
+            in_split = group["split"].eq(split)
+            wanted = requests.loc[in_scope & requests["split"].eq(split)]
+            wanted = set(wanted["prediction_id"])
+            rows = group[in_split & kept]
+            for model in models:
+                ids = set(rows.loc[rows["model_version"].eq(model), "prediction_id"])
+                if wanted - ids:
+                    raise ValueError(
+                        f"{model} has no {target} row for {min(wanted - ids)}; "
+                        "a request it cannot score must be marked unavailable"
+                    )
+            dropped = (in_split & ~kept).groupby(group["model_version"]).sum()
+            scope.append(
+                {
+                    "split": split,
+                    "task": task,
+                    "cohort": cohort,
+                    "target": target,
+                    "fit_cutoff_utc": floor,
+                    "set_by": [r for r in runs if cutoffs[r] == floor] or ["train_end"],
+                    "rows_dropped": {m: int(dropped.get(m, 0)) for m in models},
+                    "rows_scored": len(wanted),
+                    "models": models,
+                    "reason": None if wanted else "no_rows_after_fit_cutoff",
+                }
             )
-
-
-def check_same_rows(predictions: pd.DataFrame) -> None:
-    # Skill is only comparable when models and baselines score the same requests.
-    keys = ["split", "task", "cohort_version", "target_kind"]
-    for scope, frame in predictions.groupby(keys):
-        rows = frame.groupby("model_version")["prediction_id"].agg(set)
-        if any(ids != rows.iloc[0] for ids in rows):
-            raise ValueError(f"{scope}: models cover different rows")
+    return predictions[keep], scope
 
 
 def check_baselines(predictions: pd.DataFrame) -> None:
@@ -267,13 +295,22 @@ def read_manifests(artifacts: Path, runs: list[str]) -> dict[str, dict]:
     return manifests
 
 
-def check_fit_cutoffs(predictions: pd.DataFrame, manifests: dict[str, dict]) -> None:
+def fit_cutoffs(manifests: dict[str, dict]) -> dict[str, pd.Timestamp]:
+    cutoffs = {}
     for run, manifest in manifests.items():
         if manifest.get("fit_cutoff_utc") is None:
             raise ValueError(f"{run}: manifest needs fit_cutoff_utc")
         cutoff = pd.Timestamp(manifest["fit_cutoff_utc"])
         if cutoff.tzinfo is None:
             raise ValueError(f"{run}: fit_cutoff_utc needs a timezone")
+        cutoffs[run] = cutoff
+    return cutoffs
+
+
+def check_fit_cutoffs(
+    predictions: pd.DataFrame, cutoffs: dict[str, pd.Timestamp]
+) -> None:
+    for run, cutoff in cutoffs.items():
         rows = predictions[predictions["run"].eq(run)]
         early = rows[rows["as_of_utc"].lt(cutoff)]
         if len(early):
@@ -281,6 +318,29 @@ def check_fit_cutoffs(predictions: pd.DataFrame, manifests: dict[str, dict]) -> 
                 f"{run}: {early['prediction_id'].iloc[0]} is issued before the fit "
                 f"cutoff {cutoff}, so the fit saw outcomes after its issue time"
             )
+
+
+def check_requests_hash(manifests: dict[str, dict], requests_sha256: str) -> None:
+    for run, manifest in manifests.items():
+        if manifest.get("prediction_requests_sha256") != requests_sha256:
+            raise ValueError(f"{run}: built from another prediction requests table")
+
+
+def check_locked_scope(
+    predictions: pd.DataFrame, cutoffs: dict[str, pd.Timestamp]
+) -> None:
+    # A baseline run with a later cutoff would shrink the candidate's scored rows.
+    train_end = split_bounds("train")[1]
+    for key, group in predictions.groupby(SCOPE_KEY):
+        baseline = is_baseline(group["model_version"])
+        candidates = set(group.loc[~baseline, "run"])
+        floor = max([train_end, *(cutoffs[r] for r in candidates)])
+        for run in sorted(set(group.loc[baseline, "run"]) - candidates):
+            if cutoffs[run] > floor:
+                raise ValueError(
+                    f"{key}: baseline run {run} has a later fit cutoff than the "
+                    "candidate, so it would narrow the locked scope"
+                )
 
 
 def check_run_manifests(manifests: dict[str, dict]) -> None:
@@ -694,6 +754,41 @@ def evaluate_target(frame: pd.DataFrame, basis: dict[str, list[str]]) -> list[di
     return records
 
 
+def empty_slice_records(
+    scope: list[dict], predictions: pd.DataFrame, basis: dict[str, list[str]]
+) -> list[dict]:
+    counts = {
+        "n_eligible": 0,
+        "n_predicted": 0,
+        "n_excluded": 0,
+        "n_degraded": 0,
+        "n_days": 0,
+        "n_targets": 0,
+        "exclusions": {},
+        "prevalence": None,
+    }
+    place = {"airport": POOLED, "horizon": ALL_HORIZONS}
+    records = []
+    for entry in scope:
+        if entry["rows_scored"]:
+            continue
+        target = entry["target"]
+        unit = predictions.loc[predictions["target_kind"].eq(target), "unit"].iloc[0]
+        metrics = null_metrics(metric_units(target in BINARY, unit), entry["reason"])
+        identity = {
+            "split": entry["split"],
+            "cohort": entry["cohort"],
+            "task": entry["task"],
+            "target": target,
+            "target_label": TARGET_LABELS.get(target, target),
+        }
+        for model in entry["models"]:
+            records += _rows(
+                identity, place, model, basis, "own_support", metrics, counts
+            )
+    return records
+
+
 def macro_records(records: list[dict]) -> list[dict]:
     table = pd.DataFrame(records)
     table = table[table["airport"].ne(POOLED)]
@@ -1003,15 +1098,17 @@ def main(
     data_sha256 = {str(p): sha256(p) for p in [*sources, labels_path, requests_path]}
     predictions = load_predictions(artifacts, runs, locked_test, cohorts)
     manifests = read_manifests(artifacts, runs)
-    check_fit_cutoffs(predictions, manifests)
+    check_requests_hash(manifests, data_sha256[str(requests_path)])
+    cutoffs = fit_cutoffs(manifests)
+    check_fit_cutoffs(predictions, cutoffs)
     check_contract(predictions)
     requests = pd.read_parquet(requests_path, columns=REQUEST_KEYS)
     if cohorts:
         requests = requests[requests["cohort_version"].isin(cohorts)]
     check_requests(predictions, requests)
-    check_same_rows(predictions)
-    check_baselines(predictions)
-    check_label_keys(labels_path, predictions)
+    in_scope, scope = scoring_scope(predictions, requests, cutoffs)
+    check_baselines(in_scope)
+    check_label_keys(labels_path, in_scope)
     modes = (
         set(predictions["data_mode"])
         | set(requests["data_mode"])
@@ -1039,20 +1136,23 @@ def main(
             raise ValueError(f"locked test needs {SOURCE_PATHS} committed")
         if predictions["data_snapshot_id"].nunique() != 1:
             raise ValueError("locked test needs one data snapshot across runs")
-        check_locked_candidates(predictions)
+        check_locked_scope(predictions, cutoffs)
+        check_locked_candidates(in_scope)
         check_run_manifests(manifests)
         check_experiment(experiment, predictions, manifests)
+        # Hashed on the scored rows, so padding with dropped rows buys nothing.
         claim_locked_run(
-            run_id, approved_by, commit, ledger, candidate_sha256(predictions)
+            run_id, approved_by, commit, ledger, candidate_sha256(in_scope)
         )
-    ids = predictions["prediction_id"].unique().tolist()
+    ids = in_scope["prediction_id"].unique().tolist()
     labels = load_labels(labels_path, ids)
-    joined = mark_scored(join_labels(predictions, labels))
+    joined = mark_scored(join_labels(in_scope, labels))
     basis = availability_basis(predictions)
     records = []
     for _, frame in joined.groupby(SCOPE):
         records += evaluate_target(frame, basis)
     records += macro_records(records)
+    records += empty_slice_records(scope, predictions, basis)
     bins = reliability(joined)
     splits = sorted(joined["split"].unique())
     report = {
@@ -1075,6 +1175,10 @@ def main(
         "target_labels": TARGET_LABELS,
         "model_ids": sorted(predictions["model_version"].unique()),
         "availability_basis": basis,
+        "scoring_scope": [
+            {**entry, "fit_cutoff_utc": _utc(entry["fit_cutoff_utc"])}
+            for entry in scope
+        ],
         "metric_definitions": METRIC_DEFINITIONS,
         "generated_at_utc": _utc(datetime.now(UTC)),
         "metrics": records,
