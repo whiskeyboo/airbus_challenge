@@ -6,7 +6,7 @@ This is the authoritative register for decisions that change scientific meaning 
 
 | ID | Requirement | Basis |
 | --- | --- | --- |
-| R01 | Three coding agents with an integration lead | User's requested project structure |
+| R01 | Single-agent workflow governed by `CLAUDE.md`; three-agent plan archived in `docs/archive/` | User decision, 2026-10-31 |
 | R02 | Ample time; prioritise a comprehensive, rigorous project | User instruction |
 | R03 | ATL and DFW; headings 80 and 180 degrees | Challenge 5 brief, pages 5-6 |
 | R04 | Forecast 3-12 hours ahead; use 3/6/9/12 as planned horizons | Brief plus reviewed plan |
@@ -19,9 +19,9 @@ This is the authoritative register for decisions that change scientific meaning 
 | ID | Default | Owner | Change policy |
 | --- | --- | --- | --- |
 | P01 | Historical replay before live integration | Lead | Record scope change |
-| P02 | Python backend/data; FastAPI; React/TypeScript UI | Lead | Choose once before dependency lock |
+| P02 | Python 3.12 with `uv`; Streamlit dashboard | Lead | Accepted 2026-10-31 (locked in `pyproject.toml`) |
 | P03 | Seed 42; UTC internally; schema version 0.1.0 | Lead | Version and record changes |
-| P04 | 2023 train; Jan-Jun 2024 validation; Jul-Dec 2024 calibration; 2025 final test | Lead | Confirm coverage and freeze before test access |
+| P04 | 2023 train; Jan-Jun 2024 validation; Jul-Dec 2024 calibration; 2025 final test (Jan-Jul with provided CSV) | Lead | Accepted 2026-10-31; source of truth `configs/experiment.yaml` |
 | P05 | Main airport prototype may use clearly named throughput while AAR is unresolved | Lead | Does not satisfy true-AAR validation |
 | P06 | Separate conditional severe-delay and cancellation models | Lead/B | Preserve probability semantics |
 | P07 | Forecast updates hourly; flight lead times anchored to scheduled departure | Lead | Record cohort/version policy |

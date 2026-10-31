@@ -1,6 +1,6 @@
 # Evaluation and experiment protocol
 
-Status: proposed design. Exact source coverage and dates must be accepted and frozen by the integration lead before final-test access. Agent C owns the independent evaluator; B owns candidate development.
+Status: proposed design. Exact source coverage and dates must be accepted and frozen by the team before final-test access.
 
 ## 1. Proposed primary partitions
 

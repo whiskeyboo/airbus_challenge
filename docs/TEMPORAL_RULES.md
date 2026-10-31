@@ -1,6 +1,6 @@
 # Temporal correctness and leakage controls
 
-Owner: Agent A for construction; Agent B for training compliance; Agent C for independent invariance and replay checks.
+Enforced by pytest and reviewed by the `leakage-auditor` subagent.
 
 ## 1. Time semantics
 

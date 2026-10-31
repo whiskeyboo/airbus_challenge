@@ -1,6 +1,6 @@
 # Data contracts v0.1.0
 
-Status: normative prose specification for implementation; no executable schema is supplied yet. The integration lead owns shared schema code under `src/contracts/`. A builds adapters and validators against it, B consumes feature snapshots, and C consumes predictions and independently joins labels for evaluation.
+Status: normative prose specification for implementation; no executable schema is supplied yet. Implement only the parts the pipeline in `CLAUDE.md` needs; code lives in `src/airbus_challenge/`.
 
 ## Common conventions
 
