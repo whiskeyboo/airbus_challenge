@@ -1,0 +1,215 @@
+"""LightGBM model for arrival throughput (AAR proxy), fit on train (2023) only.
+
+Early stopping uses the validation split (H1 2024), so validation scores are mildly optimistic;
+calibration (H2 2024) is untouched by fitting. Predicts every in-scope validation and calibration
+request (as_of >= fit cutoff) and never the test split. Labels are read only for train and
+validation prediction ids; 2025 labels are never read.
+"""
+
+import argparse
+import json
+from datetime import UTC, datetime
+from pathlib import Path
+
+import lightgbm as lgb
+import numpy as np
+import pandas as pd
+import pyarrow as pa
+import pyarrow.dataset as ds
+import yaml
+
+from airbus_challenge import baselines, input_qa, registry
+
+ARTIFACTS = Path("artifacts")
+LABELS = Path("data/labels/labels.parquet")
+REQUESTS = Path("data/processed/prediction_requests.parquet")
+TASK = "throughput"
+TARGET = "reporting_carrier_touchdowns"
+MODEL_VERSION = "lgbm_throughput_v1"
+RUN_ID = "lgbm_throughput_dev"
+UNIT = "touchdowns/hour"
+SEED = 42
+PARAMS = {
+    "objective": "regression",
+    "learning_rate": 0.05,
+    "num_leaves": 31,
+    "min_data_in_leaf": 50,
+    "feature_fraction": 0.8,
+    "bagging_fraction": 0.8,
+    "bagging_freq": 1,
+    "lambda_l2": 1.0,
+    "seed": SEED,
+    "deterministic": True,
+    "num_threads": 4,
+    "verbose": -1,
+}
+ROUNDS, EARLY_STOP = 2000, 100
+DEV_SPLITS = ("validation", "calibration")
+
+
+def bounds(split: str) -> tuple[pd.Timestamp, pd.Timestamp]:
+    return baselines.split_bounds(split)
+
+
+def cutoff() -> pd.Timestamp:
+    return bounds("train")[1]
+
+
+def in_scope(requests: pd.DataFrame) -> pd.DataFrame:
+    """Validation + calibration requests issued at or after the fit cutoff."""
+    lo, hi = bounds(DEV_SPLITS[0])[0], bounds(DEV_SPLITS[-1])[1]
+    t = requests["target_start_utc"]
+    return requests[t.ge(lo) & t.lt(hi) & requests["as_of_utc"].ge(cutoff())]
+
+
+def model_frame(X: pd.DataFrame, airports: list[str]) -> pd.DataFrame:
+    """Registry columns as LightGBM inputs: categoricals as category, booleans as 0/1/NaN."""
+    reg = {f.name: f.dtype for f in registry.build() if f.predictor}
+    out = X.copy()
+    for c in out.columns:
+        if c == "airport_icao":
+            out[c] = pd.Categorical(out[c], categories=airports)
+        elif reg[c] == "string":
+            out[c] = out[c].astype("category")
+        elif reg[c] == "bool":
+            out[c] = out[c].map({True: 1.0, False: 0.0}).astype("float64")
+    return out
+
+
+def training_labels(path: Path, ids: list[str]) -> pd.DataFrame:
+    """Eligible throughput labels for the given prediction ids only."""
+    labels = (
+        ds.dataset(path)
+        .to_table(
+            columns=["prediction_id", "y_true", "eligible"],
+            filter=(ds.field("target_kind") == TARGET)
+            & ds.field("prediction_id").isin(ids),
+        )
+        .to_pandas()
+    )
+    return labels[labels["eligible"].fillna(False).astype(bool)][
+        ["prediction_id", "y_true"]
+    ]
+
+
+def labelled(split: str, root: Path, airports: list[str], labels_path: Path):
+    X = input_qa.assemble(TASK, root, split)
+    lab = training_labels(labels_path, X["prediction_id"].tolist())
+    df = X.merge(lab, on="prediction_id", how="inner")
+    inputs = registry.model_inputs(TASK)
+    return model_frame(df[inputs], airports), df["y_true"].to_numpy()
+
+
+def fit(train, y_train, val, y_val, objective: dict | None = None):
+    params = {**PARAMS, **(objective or {})}
+    data = lgb.Dataset(train, y_train, categorical_feature="auto", free_raw_data=False)
+    valid = lgb.Dataset(val, y_val, reference=data)
+    return lgb.train(
+        params, data, ROUNDS, valid_sets=[valid],
+        callbacks=[lgb.early_stopping(EARLY_STOP, verbose=False)],
+    )  # fmt: skip
+
+
+def predictions_frame(requests, X, models, airports) -> pd.DataFrame:
+    df = requests.merge(
+        X, on="prediction_id", how="left", suffixes=("", "_x"), validate="one_to_one"
+    )
+    inputs = registry.model_inputs(TASK)
+    feats = model_frame(df[inputs], airports)
+    point, lo, hi = (m.predict(feats, num_iteration=m.best_iteration) for m in models)
+    q = np.sort(np.stack([lo, hi]), axis=0)  # Fix quantile crossing by sorting.
+    reasons = [
+        sorted(set(a) | set(b)) if isinstance(a, list) else ["snapshot_missing"]
+        for a, b in zip(df["reason_codes"], df["demand_reason_codes"])
+    ]
+    ok = df["status"].eq("ok") & df["demand_status"].eq("ok")
+    status = np.where(ok, "available", "degraded")
+    return requests[baselines.REQUEST_COLUMNS].assign(
+        target_kind=TARGET,
+        estimate=np.clip(point, 0, None),
+        p10=np.clip(q[0], 0, None),
+        p90=np.clip(q[1], 0, None),
+        unit=UNIT,
+        status=status,
+        reason_codes=reasons,
+        model_version=MODEL_VERSION,
+        feature_version=f"{registry.REGISTRY_VERSION}",
+    )
+
+
+def main(
+    root: Path = Path("."), artifacts: Path = ARTIFACTS, labels_path: Path = LABELS
+) -> Path:
+    airports = list(
+        yaml.safe_load((root / "configs/airports.yaml").read_text())["airports"]
+    )
+    train_X, train_y = labelled("train", root, airports, labels_path)
+    val_X, val_y = labelled("validation", root, airports, labels_path)
+    models = [
+        fit(train_X, train_y, val_X, val_y),
+        fit(train_X, train_y, val_X, val_y, {"objective": "quantile", "alpha": 0.1}),
+        fit(train_X, train_y, val_X, val_y, {"objective": "quantile", "alpha": 0.9}),
+    ]
+    lo, hi = bounds(DEV_SPLITS[0])[0], bounds(DEV_SPLITS[-1])[1]
+    requests = (
+        ds.dataset(root / REQUESTS)
+        .to_table(
+            columns=baselines.REQUEST_COLUMNS,
+            filter=(ds.field("task") == TASK)
+            & (ds.field("target_start_utc") >= pa.scalar(lo, pa.timestamp("us", "UTC")))
+            & (ds.field("target_start_utc") < pa.scalar(hi, pa.timestamp("us", "UTC"))),
+        )
+        .to_pandas()
+    )
+    requests = in_scope(requests)
+    X = pd.concat(
+        [input_qa.assemble(TASK, root, s) for s in DEV_SPLITS], ignore_index=True
+    )
+    input_qa.validate_inputs(X, TASK, root)
+    snapshot_ids = ds.dataset(
+        root / registry.PROCESSED / registry.WEATHER_TABLE
+    ).to_table(columns=["data_snapshot_id"], filter=ds.field("task") == TASK)
+    snapshot_id = sorted(set(snapshot_ids.column(0).to_pylist()))
+    preds = predictions_frame(requests, X, models, airports).assign(
+        data_snapshot_id=snapshot_id[0], generated_at_utc=datetime.now(UTC)
+    )
+    run = artifacts / RUN_ID
+    baselines.write_predictions(preds, run / "predictions.parquet")
+    gain = models[0].feature_importance("gain")
+    imp = pd.DataFrame({"feature": models[0].feature_name(), "gain": gain}).nlargest(
+        15, "gain"
+    )
+    imp.to_csv(run / "feature_importance.csv", index=False)
+    manifest = {
+        "run_id": RUN_ID,
+        "producer": "airbus_challenge.train",
+        "model_version": MODEL_VERSION,
+        "commit": baselines.git("rev-parse", "HEAD"),
+        "commit_dirty": baselines.source_dirty(),
+        "data_mode": str(preds["data_mode"].iloc[0]),
+        "data_snapshot_id": snapshot_id[0],
+        "target": TARGET,
+        "fit_split": "train",
+        "early_stopping_split": "validation",
+        "fit_cutoff_utc": cutoff().isoformat(),
+        "train_airports": airports,
+        "registry_sha256": registry.to_json(registry.build())["content_sha256"],
+        "params": PARAMS,
+        "best_iteration": {
+            "point": models[0].best_iteration,
+            "p10": models[1].best_iteration,
+            "p90": models[2].best_iteration,
+        },
+        "train_rows": len(train_y),
+        "rows": len(preds),
+        "status_counts": preds["status"].value_counts().to_dict(),
+    }
+    (run / "manifest.json").write_text(json.dumps(manifest, indent=2, default=str))
+    print(run, manifest["best_iteration"], manifest["status_counts"])
+    print(imp.to_string(index=False))
+    return run
+
+
+if __name__ == "__main__":
+    argparse.ArgumentParser().parse_args()
+    main()
