@@ -1646,3 +1646,118 @@ def test_training_selection_rejects_unknown_availability_and_holdout_ratio():
         select_training_labels(
             req, labels, "loao_KATL_v1", definition, experiment, "2024-01-01T00:00Z"
         )
+
+
+def replay_fixture():
+    from airbus_challenge.requests import flight_requests
+    from airbus_challenge.targets import label_rows
+
+    df = outcome_fixture(
+        [row(), row(Flight_Number_Reporting_Airline="124", Cancelled="1")]
+    )
+    req = flight_requests(
+        df,
+        ["KATL"],
+        [3],
+        pd.Timestamp("2023-01-15T00:00Z"),
+        pd.Timestamp("2023-01-16T00:00Z"),
+        "fixture",
+    )
+    labels = label_rows(
+        req,
+        df[["flight_id", "dep_delay_min", "cancelled", *TIMES]],
+        pd.DataFrame(),
+        data_mode="fixture",
+    )
+    return req, labels
+
+
+def test_replay_payload_hides_outcomes_and_release_times_until_release():
+    from airbus_challenge.targets import replay_outcomes
+
+    req, labels = replay_fixture()
+    before = replay_outcomes(req, labels, "2023-01-15T15:04:59Z")
+    assert before.outcome_status.eq("not_released").all()
+    for column in [
+        "y_true",
+        "eligible",
+        "exclusion_reason",
+        "exclusion_detail",
+        "outcome_available_at_utc",
+    ]:
+        assert before[column].isna().all()
+    exact = replay_outcomes(req, labels, "2023-01-15T15:05:00Z")
+    known = exact[exact.outcome_status.eq("revealed")]
+    assert len(known) == 1 and known.y_true.iloc[0] == 0
+    assert known.eligible.iloc[0]
+    later = replay_outcomes(req, labels, "2023-01-17T00:00Z")
+    assert later.outcome_status.eq("revealed").sum() == 3
+    cancelled = later[later.target_kind.eq("cancellation")]
+    assert sorted(cancelled.y_true.tolist()) == [0, 1]
+    assert not {
+        "flight_id",
+        "scheduled_dep_utc",
+        "quality_flags",
+        "dep_delay_min",
+    } & set(later.columns)
+    with pytest.raises(ValueError, match="timezone-aware"):
+        replay_outcomes(req, labels, "2023-01-17")
+    with pytest.raises(ValueError, match="Duplicate replay outcome"):
+        replay_outcomes(req, pd.concat([labels, labels]), "2023-01-17T00:00Z")
+
+
+def test_replay_loader_projects_only_released_outcome_values(tmp_path, monkeypatch):
+    import yaml
+
+    from airbus_challenge import targets
+
+    req, labels = replay_fixture()
+    path = tmp_path / "labels.parquet"
+    labels.to_parquet(path, index=False)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "configs").mkdir()
+    (tmp_path / "configs/experiment.yaml").write_text(
+        yaml.safe_dump({"splits": {"test": {"start": "2025-01-01"}}})
+    )
+    real_dataset = targets.ds.dataset(path)
+    reads = []
+
+    class TrackedDataset:
+        def to_table(self, **kwargs):
+            table = real_dataset.to_table(**kwargs)
+            reads.append((kwargs["columns"], table.num_rows))
+            return table
+
+    monkeypatch.setattr(targets.ds, "dataset", lambda path: TrackedDataset())
+    out = targets.load_replay_outcomes(req, path, "2023-01-15T15:05Z")
+    assert "y_true" not in reads[0][0] and "eligible" not in reads[0][0]
+    assert reads[0][1] == 4
+    assert "y_true" in reads[1][0] and reads[1][1] == 1
+    assert out.outcome_status.eq("revealed").sum() == 1
+    pending = out[out.outcome_status.eq("not_released")]
+    assert pending.y_true.isna().all() and pending.outcome_available_at_utc.isna().all()
+
+
+def test_development_replay_rejects_test_targets_before_opening_labels(
+    tmp_path, monkeypatch
+):
+    import yaml
+
+    from airbus_challenge import targets
+
+    req, _ = replay_fixture()
+    req["target_start_utc"] = pd.Timestamp("2025-01-01T00:00Z")
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "configs").mkdir()
+    (tmp_path / "configs/experiment.yaml").write_text(
+        yaml.safe_dump({"splits": {"test": {"start": "2025-01-01"}}})
+    )
+
+    def forbidden_read(*args, **kwargs):
+        raise AssertionError("Test labels must not be opened")
+
+    monkeypatch.setattr(targets.ds, "dataset", forbidden_read)
+    with pytest.raises(ValueError, match="test-period"):
+        targets.load_replay_outcomes(
+            req, tmp_path / "absent.parquet", "2025-01-02T00:00Z"
+        )

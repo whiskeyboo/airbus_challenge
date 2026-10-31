@@ -16,7 +16,7 @@ FLIGHTS = Path("data/processed/flights.parquet")
 REQUESTS = Path("data/processed/prediction_requests.parquet")
 HOURLY = Path("data/processed/airport_hourly.parquet")
 LABELS = Path("data/labels/labels.parquet")
-VERSION = "0.7.0"
+VERSION = "0.8.0"
 LABEL_VERSION = "0.4.0"
 METRICS = {
     "scheduled_departures": (
@@ -653,6 +653,96 @@ def split_name(times, experiment):
             & times.lt(pd.Timestamp(window["end"], tz="UTC"))
         ] = name
     return result
+
+
+def replay_time(value):
+    stamp = pd.Timestamp(value)
+    if pd.isna(stamp) or stamp.tzinfo is None:
+        raise ValueError("Replay time must be a timezone-aware timestamp")
+    return stamp.tz_convert("UTC")
+
+
+def replay_outcomes(requests, labels, reveal_at):
+    reveal_at = replay_time(reveal_at)
+    selected = labels[labels.prediction_id.isin(requests.prediction_id)]
+    if selected.duplicated(["prediction_id", "target_kind"]).any():
+        raise ValueError("Duplicate replay outcome")
+    joined = selected.merge(
+        requests[["prediction_id", "data_mode"]].rename(
+            columns={"data_mode": "request_data_mode"}
+        ),
+        on="prediction_id",
+        validate="many_to_one",
+    )
+    if set(joined.prediction_id) != set(requests.prediction_id):
+        raise ValueError("Replay requests have missing outcome records")
+    if not joined.data_mode.eq(joined.request_data_mode).all():
+        raise ValueError("Replay requests and labels must use the same data_mode")
+    for mode in joined.data_mode.unique():
+        validate_data_mode(mode)
+    released = (
+        joined.eligible.fillna(False)
+        & joined.outcome_available_at_utc.notna()
+        & joined.outcome_available_at_utc.le(reveal_at)
+        & joined.availability_basis.eq("simulated")
+    )
+    if joined.loc[released, "y_true"].isna().any():
+        raise ValueError("Released replay outcomes require a value")
+    result = joined[
+        ["prediction_id", "target_kind", "unit", "availability_basis", "data_mode"]
+    ].copy()
+    result["outcome_status"] = pd.Series("not_released", index=result.index).mask(
+        released, "revealed"
+    )
+    for column in [
+        "y_true",
+        "exclusion_reason",
+        "exclusion_detail",
+        "outcome_available_at_utc",
+    ]:
+        result[column] = joined[column].where(released)
+    result["eligible"] = joined.eligible.astype("boolean").where(released)
+    return result
+
+
+def load_replay_outcomes(requests, labels_path, reveal_at):
+    reveal_at = replay_time(reveal_at)
+    experiment = yaml.safe_load(Path("configs/experiment.yaml").read_text())
+    test_start = pd.Timestamp(experiment["splits"]["test"]["start"], tz="UTC")
+    if not requests.target_start_utc.lt(test_start).all():
+        raise ValueError("Development replay cannot load test-period outcomes")
+    dataset = ds.dataset(labels_path)
+    requested = ds.field("prediction_id").isin(requests.prediction_id)
+    metadata = dataset.to_table(
+        columns=[
+            "prediction_id",
+            "target_kind",
+            "unit",
+            "availability_basis",
+            "data_mode",
+            "outcome_available_at_utc",
+        ],
+        filter=requested,
+    ).to_pandas()
+    # Outcome values are projected only for requested rows already released by the replay clock.
+    released = dataset.to_table(
+        columns=[
+            "prediction_id",
+            "target_kind",
+            "y_true",
+            "eligible",
+            "exclusion_reason",
+            "exclusion_detail",
+        ],
+        filter=requested
+        & (ds.field("outcome_available_at_utc") <= reveal_at)
+        & (ds.field("availability_basis") == "simulated")
+        & (ds.field("eligible") == True),
+    ).to_pandas()
+    labels = metadata.merge(
+        released, on=["prediction_id", "target_kind"], how="left", validate="one_to_one"
+    )
+    return replay_outcomes(requests, labels, reveal_at)
 
 
 def fit_cutoff_time(value, experiment):
