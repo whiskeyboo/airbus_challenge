@@ -585,6 +585,17 @@ def test_requests_and_targets_end_to_end_fixture(tmp_path, monkeypatch, all_coho
     assert len(labels) == (428 if all_cohorts else 204)
     import pyarrow.parquet as pq
 
+    feed = targets.build_operational_feed(targets.HOURLY, tmp_path / "feed", 10)
+    feed_path = tmp_path / "feed/operational_feed.parquet"
+    feed_manifest = json.loads(feed_path.with_suffix(".manifest.json").read_text())
+    assert len(feed) == len(hourly)
+    assert feed_manifest["source_hourly_sha256"] == sha256(targets.HOURLY)
+    assert feed_manifest["parquet_sha256"] == sha256(feed_path)
+    assert feed_manifest["availability_basis"] == "simulated"
+    assert feed_manifest["data_mode"] == "fixture"
+    assert not {"scheduled_arrivals", "throughput_over_clear_weather_p95"} & set(
+        feed.columns
+    )
     assert set(hourly.data_mode) == {"fixture"}
     assert set(labels.data_mode) == {"fixture"}
     assert not pq.read_schema(targets.HOURLY).field("data_mode").nullable
@@ -1450,3 +1461,54 @@ def test_label_denominators_use_target_split_and_preserve_partial_eligibility():
     assert counts.loc[counts.eligible, "exclusion_reason"].isna().all()
     with pytest.raises(ValueError, match="unknown prediction_id"):
         label_denominators(requests.iloc[:2], labels, experiment)
+
+
+def operational_hour_fixture():
+    starts = pd.date_range("2023-01-01T00:00Z", periods=4, freq="h")
+    return pd.DataFrame(
+        {
+            "airport_icao": ["KATL"] * 4,
+            "hour_start_utc": starts,
+            "hour_end_utc": starts + pd.Timedelta(hours=1),
+            "reporting_carrier_touchdowns": pd.Series([0, 10, 20, 30], dtype="Int32"),
+            "n_unresolved": [0, 0, 0, 0],
+            "coverage_status": ["complete_for_source_scope"] * 4,
+            "data_mode": ["fixture"] * 4,
+        }
+    )
+
+
+def test_operational_feed_release_latency_blocks_latest_finished_hour():
+    from airbus_challenge.targets import operational_feed
+
+    feed = operational_feed(operational_hour_fixture(), 10)
+    issue = pd.Timestamp("2023-01-01T04:00Z")
+    available = feed[feed.feed_eligible & feed.available_at_utc.le(issue)]
+    assert available.iloc[-1].source_hour_start_utc == pd.Timestamp("2023-01-01T02:00Z")
+    assert available.iloc[-1].reporting_carrier_touchdowns == 20
+    assert feed.iloc[-1].available_at_utc == pd.Timestamp("2023-01-01T04:10Z")
+    assert feed.iloc[0].reporting_carrier_touchdowns == 0
+    assert feed.availability_basis.eq("simulated").all()
+    exact = operational_feed(operational_hour_fixture(), 0)
+    assert exact.available_at_utc.le(issue).all()
+
+
+def test_operational_feed_partial_and_missing_counts_stay_null():
+    from airbus_challenge.targets import operational_feed
+
+    hourly = operational_hour_fixture()
+    hourly.loc[1, ["coverage_status", "n_unresolved"]] = ["partial", 1]
+    hourly.loc[2, "coverage_status"] = "missing"
+    feed = operational_feed(hourly, 10)
+    assert feed.feed_eligible.tolist() == [True, False, False, True]
+    assert feed.reporting_carrier_touchdowns.iloc[1:3].isna().all()
+    assert feed.coverage_status.tolist() == [
+        "complete_for_source_scope",
+        "partial",
+        "missing",
+        "complete_for_source_scope",
+    ]
+    with pytest.raises(ValueError, match="nonnegative"):
+        operational_feed(hourly, -1)
+    with pytest.raises(ValueError, match="Duplicate airport-hour"):
+        operational_feed(pd.concat([hourly, hourly]), 10)
