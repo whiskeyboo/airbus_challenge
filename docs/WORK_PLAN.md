@@ -18,15 +18,15 @@ Do these in order, on `main`:
    uv add matplotlib airportsdata
    ```
 4. Settle the proposed benign-weather rule (`docs/DECISIONS.md` P10) and the delay-model population (O08).
-5. Create one worktree per agent on the machine that runs it. `.gitignore` must be updated first, or `git add -A` commits the `data` link.
+5. Create one worktree per agent on the machine that runs it. `.gitignore` must be updated first, or `git add -A` commits the `data` link. Run these from the main repo root; `$PWD` keeps the links absolute whatever the clone path.
    ```bash
    git worktree add ../ac-flights -b flights main
    ```
    ```bash
-   ln -s ~/Projects/airbus_challenge/data ../ac-flights/data
+   ln -s "$PWD/data" ../ac-flights/data
    ```
    ```bash
-   ln -s ~/Projects/airbus_challenge/.env ../ac-flights/.env
+   ln -s "$PWD/.env" ../ac-flights/.env
    ```
    Repeat for `../ac-weather` on branch `weather`. Agent 3 uses `../ac-model` on branch `model`.
 
