@@ -10,7 +10,7 @@ Status at commit `908c1d9`. Decision IDs refer to [DECISIONS.md](DECISIONS.md); 
 ## Data scope and coverage
 - **Partial hours (P12).** An hour is excluded if more than 5% of its arrivals cannot be placed in it. That removes 60 of 45,360 airport-hours (KATL 26, KDFW 34). The rate is 0.29% in IFR/thunderstorm hours vs 0.12% otherwise, so exclusions fall in bad weather. Excluded hours keep a null target with `exclusion_detail`, never zero. Persistence rows built from a partial source hour carry `source_hour_partial`.
 - **The provided CSV is a sparse flight sample** (about 6 ATL arrivals/day, no wind direction, weather recorded at flight time). It is used only for the separate CSV-only comparison, never for airport counts or features, and never spliced into the main score (R08).
-- **Unexplained 2025 ATL volume drop.** Teammates report January ATL volume of about 770 arrivals/day in 2025 vs 848 before. This could shift the train/test distribution. A schedule-only drift audit (2-A1d) is planned but not done.
+- **Unexplained 2025 ATL volume drop.** Teammates report January ATL volume of about 770 arrivals/day in January 2025 vs 848 in January 2024. This could shift the train/test distribution. A schedule-only drift audit (2-A1d) is planned but not done.
 - Corrected (COR) METARs have unknown send times and are never used. About 1.5% of feature rows therefore use an older METAR (P13).
 - Only two airports. Leave-one-airport-out is a limited transfer stress test, not evidence of global skill.
 
@@ -36,7 +36,7 @@ Status at commit `908c1d9`. Decision IDs refer to [DECISIONS.md](DECISIONS.md); 
 - **Audits are paused, so G3 is not accepted.** A passing test count is not gate acceptance.
 - **The locked 2025 test has not been run.** It needs the lead's release after the model is frozen (G6; `--locked-test --approved-by`). Each claim is written exclusively to `data/locked_runs/` and mirrored to the committed `reports/locked_runs/`. A different machine with its own `data/` is a procedural risk until the mirror is pushed and pulled.
 - SHAP drivers are associations, not causes.
-- The LLM brief (`explain.py`, in progress) only restates facts computed by code, cites input timestamps, says "insufficient data" when inputs are missing, and falls back to a template if the LLM fails. It never computes numbers.
+- The LLM brief (`explain.py`) only restates facts computed by code, cites input timestamps, says "insufficient data" when inputs are missing, and falls back to a template if the LLM fails. It never computes numbers.
 - No fuel, cost or prevented-delay benefit is measured. A replay alone cannot establish one.
 
 ## How the user would know

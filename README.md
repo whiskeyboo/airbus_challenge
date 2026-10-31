@@ -13,9 +13,9 @@ On macOS, LightGBM also needs the OpenMP runtime: `brew install libomp`.
 
 ## Pipeline
 
-download → clean → requests → iem → targets → features → baselines → train (in progress) → evaluate → recommend (in progress) → explain (in progress) → dashboard
+download → clean → requests → iem → targets → features → baselines + flight_baselines → train (teammate, in progress) → evaluate → failures (in progress) → recommend → explain → dashboard
 
-`flight_baselines.py`, `train.py`, `recommend.py`, `explain.py` and `failures.py` are being built on the `model` branch and by a teammate. They are not on this commit.
+`train.py` is being built by a teammate and `failures.py` is in progress. `recommend.py` uses provisional thresholds until WP-D7.
 
 Development run, in order. `iem` runs before `targets` because the P12 exclusion audit reads METARs.
 
@@ -27,7 +27,9 @@ uv run python -m airbus_challenge.iem         # weather_observations / weather_f
 uv run python -m airbus_challenge.targets     # airport_hourly.parquet, data/labels/labels.parquet
 uv run python -m airbus_challenge.features    # feature_snapshots / feature_lineage
 uv run python -m airbus_challenge.baselines   # artifacts/baselines_dev/
-uv run python -m airbus_challenge.evaluate    # reports/metrics_dev.json + reports/figures/
+uv run python -m airbus_challenge.flight_baselines  # artifacts/baselines_flight_dev/
+uv run python -m airbus_challenge.evaluate --runs baselines_dev baselines_flight_dev  # reports/metrics_dev.json + figures
+uv run python -m airbus_challenge.recommend --run <run_id>  # advisories.parquet for the dashboard
 ```
 
 Dashboard (historical replay with an issue-time slider):
