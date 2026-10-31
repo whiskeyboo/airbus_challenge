@@ -19,7 +19,8 @@ from airbus_challenge.baselines import (
     ARTIFACTS,
     DATA_MODES,
     EXPERIMENT,
-    LOCKED_LEDGER,
+    LEDGER,
+    LEDGER_MIRROR,
     PREDICTION_SCHEMA,
     REQUESTS,
     RETROSPECTIVE_SCHEDULE,
@@ -27,6 +28,7 @@ from airbus_challenge.baselines import (
     SOURCE_PATHS,
     TARGET,
     TARGET_LABEL,
+    check_canonical,
     check_predictions,
     claim_locked_run,
     git,
@@ -1081,16 +1083,28 @@ def write_report(report: dict, path: Path) -> None:
 
 def main(
     runs: list[str],
-    labels_path: Path = LABELS,
-    requests_path: Path = REQUESTS,
-    artifacts: Path = ARTIFACTS,
-    reports: Path = REPORTS,
-    ledger: Path = LOCKED_LEDGER,
+    labels_path: Path | None = None,
+    requests_path: Path | None = None,
+    artifacts: Path | None = None,
+    reports: Path | None = None,
+    ledger: Path | None = None,
+    mirror: Path | None = None,
     locked_test: bool = False,
     approved_by: str | None = None,
     experiment: str = "primary",
     cohorts: list[str] | None = None,
 ) -> Path:
+    labels_path, requests_path = labels_path or LABELS, requests_path or REQUESTS
+    artifacts, reports = artifacts or ARTIFACTS, reports or REPORTS
+    ledger, mirror = ledger or LEDGER, mirror or LEDGER_MIRROR
+    if locked_test:
+        check_canonical(
+            labels=(labels_path, LABELS),
+            requests=(requests_path, REQUESTS),
+            reports=(reports, REPORTS),
+            ledger=(ledger, LEDGER),
+            mirror=(mirror, LEDGER_MIRROR),
+        )
     if experiment not in LOCKED_EXPERIMENTS:
         raise ValueError(f"experiment outside {LOCKED_EXPERIMENTS}")
     # Hashed before the read, because worktrees share data/.
@@ -1142,7 +1156,7 @@ def main(
         check_experiment(experiment, predictions, manifests)
         # Hashed on the scored rows, so padding with dropped rows buys nothing.
         claim_locked_run(
-            run_id, approved_by, commit, ledger, candidate_sha256(in_scope)
+            run_id, approved_by, commit, candidate_sha256(in_scope), ledger, mirror
         )
     ids = in_scope["prediction_id"].unique().tolist()
     labels = load_labels(labels_path, ids)
@@ -1210,14 +1224,13 @@ def cli(argv: list[str] | None = None) -> Path:
     parser.add_argument("--requests", type=Path)
     parser.add_argument("--reports", type=Path)
     args = parser.parse_args(argv)
-    # Locked runs read and write only the paths the ledger and manifests vouch for.
     if args.locked_test and (args.reports or args.requests):
         parser.error("--locked-test uses the default --reports and --requests")
     default = "baselines_locked_test" if args.locked_test else "baselines_dev"
     return main(
         args.runs or [default],
-        requests_path=args.requests or REQUESTS,
-        reports=args.reports or REPORTS,
+        requests_path=args.requests,
+        reports=args.reports,
         locked_test=args.locked_test,
         approved_by=args.approved_by,
         experiment=args.experiment,

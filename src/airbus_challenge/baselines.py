@@ -17,8 +17,10 @@ EXPERIMENT = yaml.safe_load(Path("configs/experiment.yaml").read_text())
 HOURLY = Path("data/processed/airport_hourly.parquet")
 REQUESTS = Path("data/processed/prediction_requests.parquet")
 ARTIFACTS = Path("artifacts")
-# Tracked in git: a claim outlives a crash and reaches other worktrees once pushed.
-LOCKED_LEDGER = Path("reports/locked_runs")
+# data/ is shared by every worktree, so the exclusive create there is the lock.
+LEDGER = Path("data/locked_runs")
+# Committed copy, so a claim also travels with the repo.
+LEDGER_MIRROR = Path("reports/locked_runs")
 
 TARGET = EXPERIMENT["targets"]["throughput"]
 TARGET_LABEL = "arrival throughput (AAR proxy)"
@@ -371,19 +373,23 @@ def claim_locked_run(
     name: str,
     approved_by: str,
     commit: str,
-    ledger: Path = LOCKED_LEDGER,
     predictions_sha256: str | None = None,
+    ledger: Path | None = None,
+    mirror: Path | None = None,
 ) -> None:
-    ledger.mkdir(parents=True, exist_ok=True)
-    if predictions_sha256:
-        for path in sorted(ledger.glob("*.json")):
-            if json.loads(path.read_text()).get("predictions_sha256") == (
-                predictions_sha256
-            ):
-                raise FileExistsError(
-                    f"these predictions were claimed as {path.stem}; "
-                    "the locked test runs once"
-                )
+    ledger, mirror = ledger or LEDGER, mirror or LEDGER_MIRROR
+    for path in [*sorted(ledger.glob("*.json")), *sorted(mirror.glob("*.json"))]:
+        if path.stem == name:
+            raise FileExistsError(
+                f"{name} was claimed in {path.parent}; the locked test runs once"
+            )
+        if predictions_sha256 and (
+            json.loads(path.read_text()).get("predictions_sha256") == predictions_sha256
+        ):
+            raise FileExistsError(
+                f"these predictions were claimed as {path.stem} in {path.parent}; "
+                "the locked test runs once"
+            )
     claim = {
         "run": name,
         "approved_by": approved_by,
@@ -391,23 +397,48 @@ def claim_locked_run(
         "predictions_sha256": predictions_sha256,
         "claimed_at_utc": datetime.now(UTC).isoformat(),
     }
+    text = json.dumps(claim, indent=2)
+    ledger.mkdir(parents=True, exist_ok=True)
     try:
         with open(ledger / f"{name}.json", "x") as file:
-            json.dump(claim, file, indent=2)
+            file.write(text)
     except FileExistsError as error:
         raise FileExistsError(
             f"{name} was claimed in {ledger}; the locked test runs once"
         ) from error
+    mirror.mkdir(parents=True, exist_ok=True)
+    (mirror / f"{name}.json").write_text(text)
+    print(f"claimed {name}: commit {mirror / f'{name}.json'}")
+
+
+def check_canonical(**paths: tuple[Path, Path]) -> None:
+    # Locked runs read and write only the paths the ledger and manifests vouch for.
+    moved = [
+        k for k, (given, home) in paths.items() if given.resolve() != home.resolve()
+    ]
+    if moved:
+        raise ValueError(f"locked test needs the canonical {moved} paths")
 
 
 def main(
-    hourly_path: Path = HOURLY,
-    requests_path: Path = REQUESTS,
-    artifacts: Path = ARTIFACTS,
+    hourly_path: Path | None = None,
+    requests_path: Path | None = None,
+    artifacts: Path | None = None,
     locked_test: bool = False,
     approved_by: str | None = None,
-    ledger: Path = LOCKED_LEDGER,
+    ledger: Path | None = None,
+    mirror: Path | None = None,
 ) -> Path:
+    hourly_path, requests_path = hourly_path or HOURLY, requests_path or REQUESTS
+    artifacts = artifacts or ARTIFACTS
+    ledger, mirror = ledger or LEDGER, mirror or LEDGER_MIRROR
+    if locked_test:
+        check_canonical(
+            hourly=(hourly_path, HOURLY),
+            requests=(requests_path, REQUESTS),
+            ledger=(ledger, LEDGER),
+            mirror=(mirror, LEDGER_MIRROR),
+        )
     run_id = "baselines_locked_test" if locked_test else "baselines_dev"
     path = artifacts / run_id / "predictions.parquet"
     commit, commit_dirty = git("rev-parse", "HEAD"), source_dirty()
@@ -440,7 +471,7 @@ def main(
         raise ValueError(f"expected one schedule basis, found {schedule_bases}")
     scored = scored_requests(context, requests, locked_test)
     if locked_test:
-        claim_locked_run(run_id, approved_by, commit, ledger)
+        claim_locked_run(run_id, approved_by, commit, None, ledger, mirror)
     outcomes = pd.read_parquet(hourly_path, columns=OUTCOME_COLUMNS, filters=filters)
     hourly = context.merge(outcomes, on=KEYS, validate="one_to_one")
     predictions, schedule_fit = predict_scored(hourly, scored)

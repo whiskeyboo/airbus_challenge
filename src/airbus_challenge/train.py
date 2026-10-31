@@ -19,6 +19,7 @@ import pyarrow.dataset as ds
 import yaml
 
 from airbus_challenge import baselines, input_qa, registry
+from airbus_challenge.download import sha256
 
 ARTIFACTS = Path("artifacts")
 LABELS = Path("data/labels/labels.parquet")
@@ -194,6 +195,7 @@ def main(
         "fit_split": "train",
         "early_stopping_split": "validation",
         "fit_cutoff_utc": cutoff().isoformat(),
+        "prediction_requests_sha256": sha256(root / REQUESTS),
         "train_airports": airports,
         "registry_sha256": registry.to_json(registry.build())["content_sha256"],
         "params": PARAMS,
@@ -313,6 +315,7 @@ def delay_main(
         "target": d["target"], "fit_split": "train", "early_stopping_split": "validation",
         "train_subsample_rows": len(train_y), "val_subsample_rows": len(val_y),
         "fit_cutoff_utc": cutoff().isoformat(), "train_airports": airports,
+        "prediction_requests_sha256": sha256(root / REQUESTS),
         "registry_sha256": registry.to_json(registry.build())["content_sha256"],
         "params": {**PARAMS, "objective": "binary"}, "best_iteration": model.best_iteration,
         "rows": len(preds), "status_counts": preds["status"].value_counts().to_dict(),

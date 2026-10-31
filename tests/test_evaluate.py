@@ -1,4 +1,6 @@
 import json
+import shutil
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -975,6 +977,17 @@ def clean_git(monkeypatch):
     monkeypatch.setattr(evaluate, "git", lambda *args: "")
 
 
+@pytest.fixture(autouse=True)
+def canonical(monkeypatch, tmp_path):
+    # Every test sees tmp canonical paths, so none can touch the real ledger.
+    monkeypatch.setattr(evaluate, "LABELS", tmp_path / "labels.parquet")
+    monkeypatch.setattr(evaluate, "REQUESTS", tmp_path / "requests.parquet")
+    monkeypatch.setattr(evaluate, "REPORTS", tmp_path / "reports")
+    for module in (baselines, evaluate):
+        monkeypatch.setattr(module, "LEDGER", tmp_path / "ledger")
+        monkeypatch.setattr(module, "LEDGER_MIRROR", tmp_path / "mirror")
+
+
 def run_inputs(table: pd.DataFrame, labels: pd.DataFrame, tmp_path) -> list:
     artifacts = tmp_path / "artifacts"
     requests_path = tmp_path / "requests.parquet"
@@ -987,6 +1000,7 @@ def run_inputs(table: pd.DataFrame, labels: pd.DataFrame, tmp_path) -> list:
         artifacts,
         tmp_path / "reports",
         tmp_path / "ledger",
+        tmp_path / "mirror",
     ]
 
 
@@ -1065,12 +1079,16 @@ def locked_inputs(tmp_path, table=None, label_mode: str = "real") -> list:
 def locked_run(
     inputs: list, approved_by: str | None = "tester", runs=("run",)
 ) -> object:
-    return main(list(runs), *inputs, locked_test=True, approved_by=approved_by)
+    # Canonical paths come from the patched constants, not from arguments.
+    return main(
+        list(runs), artifacts=inputs[2], locked_test=True, approved_by=approved_by
+    )
 
 
 def assert_nothing_happened(inputs: list) -> None:
     assert not (inputs[3] / "metrics.json").exists()
     assert not inputs[4].exists()
+    assert not inputs[5].exists()
 
 
 def test_locked_run_claims_then_writes_once(tmp_path, clean_git):
@@ -1424,7 +1442,11 @@ def test_a_candidate_must_cover_every_cell():
 
 def locked_as(inputs: list, experiment: str) -> object:
     return main(
-        ["run"], *inputs, locked_test=True, approved_by="tester", experiment=experiment
+        ["run"],
+        artifacts=inputs[2],
+        locked_test=True,
+        approved_by="tester",
+        experiment=experiment,
     )
 
 
@@ -1492,9 +1514,7 @@ def test_the_same_forecasts_cannot_be_locked_again_under_new_names(tmp_path, cle
         prediction_id=table["prediction_id"] + "|v2",
         model_version=table["model_version"].replace(MODEL, OTHER_MODEL),
     )
-    (tmp_path / "second").mkdir()
-    second = locked_inputs(tmp_path / "second", renamed)
-    second[4] = inputs[4]
+    second = locked_inputs(tmp_path, renamed)
     with pytest.raises(FileExistsError, match="claimed as evaluate_leave_out_KATL"):
         locked_as(second, "primary")
     assert not (second[3] / "metrics.json").exists()
@@ -1513,22 +1533,61 @@ def test_the_candidate_hash_ignores_names_but_not_forecasts():
 
 
 def test_a_claim_refuses_predictions_already_claimed(tmp_path):
-    baselines.claim_locked_run("first", "tester", "abc", tmp_path, "hash-1")
+    baselines.claim_locked_run("first", "tester", "abc", "hash-1")
     with pytest.raises(FileExistsError, match="claimed as first"):
-        baselines.claim_locked_run("second", "tester", "abc", tmp_path, "hash-1")
-    baselines.claim_locked_run("third", "tester", "abc", tmp_path, "hash-2")
-    assert json.loads((tmp_path / "third.json").read_text())["predictions_sha256"] == (
-        "hash-2"
-    )
+        baselines.claim_locked_run("second", "tester", "abc", "hash-1")
+    baselines.claim_locked_run("third", "tester", "abc", "hash-2")
+    third = json.loads((tmp_path / "ledger" / "third.json").read_text())
+    assert third["predictions_sha256"] == "hash-2"
 
 
-def test_another_reports_folder_cannot_buy_a_second_locked_run(tmp_path, clean_git):
+def test_another_reports_folder_cannot_buy_a_second_locked_run(
+    tmp_path, clean_git, monkeypatch
+):
     inputs = locked_inputs(tmp_path)
     locked_run(inputs)
-    elsewhere = [*inputs[:3], tmp_path / "elsewhere", inputs[4]]
+    elsewhere = tmp_path / "elsewhere"
+    with pytest.raises(ValueError, match="canonical"):
+        main(
+            ["run"],
+            artifacts=inputs[2],
+            reports=elsewhere,
+            locked_test=True,
+            approved_by="tester",
+        )
+    # Even a moved canonical reports folder finds the run spent.
+    monkeypatch.setattr(evaluate, "REPORTS", elsewhere)
     with pytest.raises(FileExistsError, match="runs once"):
-        locked_run(elsewhere)
-    assert not (tmp_path / "elsewhere").exists()
+        locked_run(inputs)
+    assert not elsewhere.exists()
+
+
+@pytest.mark.parametrize(
+    "moved", ["labels_path", "requests_path", "reports", "ledger", "mirror"]
+)
+def test_locked_main_refuses_non_canonical_paths(tmp_path, clean_git, moved):
+    inputs = locked_inputs(tmp_path)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    sources = {"labels_path": inputs[0], "requests_path": inputs[1]}
+    path = (
+        Path(shutil.copy(sources[moved], elsewhere))
+        if moved in sources
+        else (elsewhere / moved)
+    )
+    with pytest.raises(
+        ValueError, match=f"canonical .*'{moved.removesuffix('_path')}'"
+    ):
+        main(
+            ["run"],
+            artifacts=inputs[2],
+            locked_test=True,
+            approved_by="tester",
+            **{moved: path},
+        )
+    assert_nothing_happened(inputs)
+    assert not list(tmp_path.rglob("evaluate_*.json"))
+    assert not list(tmp_path.rglob("metrics*.json"))
 
 
 @pytest.mark.parametrize("flag", ["--reports", "--requests"])
