@@ -298,15 +298,32 @@ def check_baselines(predictions: pd.DataFrame) -> None:
                 raise ValueError(f"{cell}: {model} shares no row with both baselines")
 
 
-def check_locked_candidates(predictions: pd.DataFrame) -> None:
+def check_locked_candidates(
+    predictions: pd.DataFrame, expected_models: dict[str, list[str]] | None = None
+) -> None:
     candidates = predictions[~is_baseline(predictions["model_version"])]
     scope = ["cohort_version", "target_kind"]
     per_target = candidates.groupby(scope)["model_version"].nunique()
     targets = set(predictions[scope].itertuples(index=False, name=None))
-    if set(per_target.index) != targets or per_target.ne(1).any():
-        raise ValueError(f"locked test needs one frozen model for each of {targets}")
+    if expected_models is None:
+        if set(per_target.index) != targets or per_target.ne(1).any():
+            raise ValueError(f"locked test needs one frozen model for each of {targets}")
+    else:
+        if predictions["cohort_version"].nunique() != 1 or set(predictions["target_kind"]) != set(expected_models):
+            raise ValueError("prediction targets differ from the frozen candidate matrix")
+        for target, expected in expected_models.items():
+            actual = set(candidates.loc[candidates["target_kind"].eq(target), "model_version"])
+            if actual != set(expected):
+                raise ValueError(f"{target}: candidates differ from the frozen matrix")
+            wanted = predictions.loc[predictions["target_kind"].eq(target), CELL].drop_duplicates()
+            for model in expected:
+                usable = candidates.loc[candidates["model_version"].eq(model) & candidates["estimate"].notna(), CELL].drop_duplicates()
+                if wanted.merge(usable, how="left", indicator=True)["_merge"].ne("both").any():
+                    raise ValueError(f"{model}: no usable estimate in a frozen scoring cell")
     # A candidate that scores nothing would spend the run on an all-null report.
     cells = predictions[CELL].drop_duplicates()
+    if expected_models is not None:
+        cells = cells[cells["target_kind"].isin([t for t, models in expected_models.items() if models])]
     usable = candidates[candidates["estimate"].notna()][CELL].drop_duplicates()
     empty = cells.merge(usable, how="left", indicator=True)
     empty = empty[empty["_merge"].ne("both")]
@@ -356,14 +373,15 @@ def check_requests_hash(manifests: dict[str, dict], requests_sha256: str) -> Non
 
 
 def check_locked_scope(
-    predictions: pd.DataFrame, cutoffs: dict[str, pd.Timestamp]
+    predictions: pd.DataFrame, cutoffs: dict[str, pd.Timestamp],
+    assessment_cutoff: pd.Timestamp | None = None,
 ) -> None:
     # A baseline run with a later cutoff would shrink the candidate's scored rows.
     train_end = split_bounds("train")[1]
     for key, group in predictions.groupby(SCOPE_KEY):
         baseline = is_baseline(group["model_version"])
         candidates = set(group.loc[~baseline, "run"])
-        floor = max([train_end, *(cutoffs[r] for r in candidates)])
+        floor = max([train_end, assessment_cutoff or train_end, *(cutoffs[r] for r in candidates)])
         for run in sorted(set(group.loc[baseline, "run"]) - candidates):
             if cutoffs[run] > floor:
                 raise ValueError(
@@ -1224,15 +1242,28 @@ def main(
     experiment: str = "primary",
     cohorts: list[str] | None = None,
     slices_path: Path | None = None,
+    release: bool = False,
 ) -> Path:
+    release_paths = None
+    if release:
+        if not locked_test:
+            raise ValueError("a frozen release is only used for the locked assessment")
+        from airbus_challenge.release import verify_frozen
+        frozen = verify_frozen(require_claim=True)
+        slot = frozen["experiments"][experiment]
+        if runs != [slot["run_id"]]:
+            raise ValueError("runs differ from the frozen experiment")
+        release_paths = (Path(slot["labels"]), Path(slot["requests"]))
+        labels_path = labels_path or release_paths[0]
+        requests_path = requests_path or release_paths[1]
     labels_path, requests_path = labels_path or LABELS, requests_path or REQUESTS
     slices_path = slices_path or SLICES
     artifacts, reports = artifacts or ARTIFACTS, reports or REPORTS
     ledger, mirror = ledger or LEDGER, mirror or LEDGER_MIRROR
     if locked_test:
         check_canonical(
-            labels=(labels_path, LABELS),
-            requests=(requests_path, REQUESTS),
+            labels=(labels_path, release_paths[0] if release_paths else LABELS),
+            requests=(requests_path, release_paths[1] if release_paths else REQUESTS),
             reports=(reports, REPORTS),
             ledger=(ledger, LEDGER),
             mirror=(mirror, LEDGER_MIRROR),
@@ -1248,6 +1279,13 @@ def main(
         data_sha256[str(slices_path)] = sha256(slices_path)
     predictions = load_predictions(artifacts, runs, locked_test, cohorts)
     manifests = read_manifests(artifacts, runs)
+    if release:
+        from airbus_challenge.release import FREEZE
+        for manifest in manifests.values():
+            if (manifest.get("release_sha256") != sha256(FREEZE)
+                    or manifest.get("commit") != frozen["commit"]
+                    or manifest.get("fit_cutoff_utc") != frozen["fit_cutoff_utc"]):
+                raise ValueError("prediction manifest differs from the sealed release")
     check_requests_hash(manifests, data_sha256[str(requests_path)])
     cutoffs = fit_cutoffs(manifests)
     check_fit_cutoffs(predictions, cutoffs)
@@ -1294,8 +1332,8 @@ def main(
             raise ValueError(f"locked test needs {SOURCE_PATHS} committed")
         if predictions["data_snapshot_id"].nunique() != 1:
             raise ValueError("locked test needs one data snapshot across runs")
-        check_locked_scope(predictions, cutoffs)
-        check_locked_candidates(in_scope)
+        check_locked_scope(predictions, cutoffs, pd.Timestamp(frozen["fit_cutoff_utc"]) if release else None)
+        check_locked_candidates(in_scope, slot["expected_candidates"] if release else None)
         check_run_manifests(manifests)
         check_experiment(experiment, predictions, manifests)
         # Hashed on the scored rows, so padding with dropped rows buys nothing.

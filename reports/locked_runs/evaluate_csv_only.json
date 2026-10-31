@@ -1,0 +1,7 @@
+{
+  "run": "evaluate_csv_only",
+  "approved_by": "Project lead: explicit chat approval for frozen one-time 2025 assessment, 2026-10-31",
+  "commit": "7f6c1b3a184d1695c2c2a936948f0d5ac2a26151",
+  "predictions_sha256": "3f24445d0d7ee42d3a15a8c80e9da1145ef43330e3184e894089856b3f01aac8",
+  "claimed_at_utc": "2026-10-31T10:18:04.180889+00:00"
+}

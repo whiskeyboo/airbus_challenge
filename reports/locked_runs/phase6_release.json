@@ -1,0 +1,13 @@
+{
+  "run": "phase6_release",
+  "approved_by": "Project lead: explicit chat approval for frozen one-time 2025 assessment, 2026-10-31",
+  "commit": "7f6c1b3a184d1695c2c2a936948f0d5ac2a26151",
+  "release_sha256": "fb2a241f3d43825854a0c83503756aa9014146a9ef88a5d84567cc3b881b93aa",
+  "claimed_at_utc": "2026-10-31T10:08:08.875023+00:00",
+  "experiments": [
+    "primary",
+    "csv_only",
+    "leave_out_KATL",
+    "leave_out_KDFW"
+  ]
+}
