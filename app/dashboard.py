@@ -106,6 +106,11 @@ st.caption(
     "Advisory information for review by a traffic management coordinator. It does not issue "
     "clearances or start traffic management initiatives."
 )
+st.warning(
+    "Development demonstration: candidate models used H1 2024 for early stopping, although "
+    "their recorded fit cutoff is 1 January 2024. Validation scores are not independent; "
+    "some degraded predictions have no validated fallback. Treat these outputs as provisional."
+)
 replay_tab, cases_tab, eval_tab = st.tabs(
     ["Replay at T", "Failure cases", "Evaluation (read-only)"]
 )
@@ -267,18 +272,29 @@ with replay_tab:
     rows = timed("run_rows", run_rows, run, icao, t) if run else pd.DataFrame()
     rec = None
     if run is None:
-        st.info(f"Predictions {dd.not_generated('train')} (or `airbus_challenge.baselines`).")
+        st.info(
+            f"Predictions {dd.not_generated('train')} (or `airbus_challenge.baselines`)."
+        )
     elif rows.empty:
-        st.info(f"No prediction rows for {icao} at {fmt_t(t)} in run `{run}`: no advisory.")
+        st.info(
+            f"No prediction rows for {icao} at {fmt_t(t)} in run `{run}`: no advisory."
+        )
     else:
         models = dd.advisory_models(rows)
         model = st.selectbox("Throughput model for the advisory", models, key="adv_model") if models else None  # fmt: skip
         used = dd.advisory_rows(rows, model)
         # The run's WP-D7 calibration.json when present, else the provisional thresholds.
-        policy = recommend.load_policy(Path(dd.ARTIFACTS) / run)
+        policy = recommend.load_policy(ROOT / dd.ARTIFACTS / run)
         rec = recommend.recommend(used, reference(), policy)
+        if rec["threshold_label"] == recommend.THRESHOLD_LABEL:
+            st.warning(
+                "This run has no calibrated alert policy. Its provisional advisory levels "
+                "are for demonstration and are not validated for operational use."
+            )
         st.subheader(f"Level: {rec['level'].upper()}")
-        (st.warning if rec["level"] in ("abstain", "watch", "act") else st.success)(rec["message"])
+        (st.warning if rec["level"] in ("abstain", "watch", "act") else st.success)(
+            rec["message"]
+        )
         st.caption(
             f"Computed by code rules in recommend.py from the saved prediction rows. Thresholds "
             f"are `{rec['threshold_label']}`: {rec['thresholds']['source']}."
@@ -299,7 +315,9 @@ with replay_tab:
         else:
             st.json(canc["numbers"], expanded=False)
         if rec["ignored_target_kinds"]:
-            st.caption(f"Ignored target kinds: {', '.join(rec['ignored_target_kinds'])}")
+            st.caption(
+                f"Ignored target kinds: {', '.join(rec['ignored_target_kinds'])}"
+            )
         saved = timed("advisories", advisories, run, icao, t)
         with st.expander("Saved advisories.parquet for this run"):
             if saved is None:
@@ -322,7 +340,10 @@ with replay_tab:
         if st.button("Write brief with LLM (network call)", key="brief_llm"):
             st.session_state[key] = dd.make_brief(rec, drivers, stamps, use_llm=True)
         b = st.session_state.get(key) or dd.make_brief(rec, drivers, stamps)
-        st.markdown(f"Path: **{b['path']}**" + (f" ({'; '.join(b['reason'])})" if b["reason"] else ""))
+        st.markdown(
+            f"Path: **{b['path']}**"
+            + (f" ({'; '.join(b['reason'])})" if b["reason"] else "")
+        )
         st.write(b["text"])
         st.caption("SHAP drivers are associations, not causes. Every number in the brief comes "
                    "from code; the LLM only writes words and is checked against the facts.")  # fmt: skip
@@ -333,7 +354,13 @@ with replay_tab:
         st.caption(
             "Realised outcomes, for replay review only. Never used by the forecast above."
         )
-        if st.toggle("Load realised outcomes", key="show_outcomes"):
+        if st.toggle(
+            "Load realised outcomes", key="show_outcomes"
+        ) and not dd.replay_window_is_development(ROOT, t):
+            st.warning(
+                "Locked 2025 outcomes are unavailable in this development replay."
+            )
+        elif st.session_state.show_outcomes:
             out = timed("replay_outcomes", replay_outcomes, icao, t)
             hourly = out["hourly"]
             fig = go.Figure()
@@ -367,7 +394,9 @@ with cases_tab:
     st.header("Worst misses (failures.py report)")
     fail_files = dd.list_failure_files(ROOT)
     if not fail_files:
-        st.info(f"Failure cases {dd.not_generated('failures --metrics reports/metrics_dev.json')}")
+        st.info(
+            f"Failure cases {dd.not_generated('failures --metrics reports/metrics_dev.json')}"
+        )
     else:
         fpath = st.selectbox("Failure-case file", fail_files,
                              format_func=lambda p: str(p.relative_to(ROOT)))  # fmt: skip
@@ -383,8 +412,12 @@ with cases_tab:
             with st.expander(f"{s['airport']} h={s['horizon_h']} {s['target']}: predicted "
                              f"{s['estimate']} vs outcome {s['outcome']} (error {s['error']})"):  # fmt: skip
                 st.dataframe(pd.DataFrame([s]), hide_index=True)
-                possible = {True: "yes", False: "no", None: "unknown"}[v["advisory_possible"]]
-                st.markdown(f"**Advisory possible at T:** {possible}: {v['advisory_reason']}")
+                possible = {True: "yes", False: "no", None: "unknown"}[
+                    v["advisory_possible"]
+                ]
+                st.markdown(
+                    f"**Advisory possible at T:** {possible}: {v['advisory_reason']}"
+                )
                 st.markdown("**Limitations**")
                 for line in v["limitations"] or ["none flagged"]:
                     st.markdown(f"- {line}")

@@ -306,16 +306,24 @@ def _by_preference(models) -> list[str]:
 
 def advisory_models(preds: pd.DataFrame) -> list[str]:
     """Throughput models in the run, candidates before baselines."""
-    return _by_preference(preds.loc[preds["target_kind"].eq(TARGET), "model_version"].unique())
+    return _by_preference(
+        preds.loc[preds["target_kind"].eq(TARGET), "model_version"].unique()
+    )
 
 
-def advisory_rows(preds: pd.DataFrame, throughput_model: str | None = None) -> pd.DataFrame:
+def advisory_rows(
+    preds: pd.DataFrame, throughput_model: str | None = None
+) -> pd.DataFrame:
     """One model per target kind, as recommend() requires: the chosen throughput model, else
     a candidate model before any baseline."""
     keep = []
     for kind, g in preds.groupby("target_kind"):
         models = _by_preference(g["model_version"].unique())
-        pick = throughput_model if kind == TARGET and throughput_model in models else models[0]
+        pick = (
+            throughput_model
+            if kind == TARGET and throughput_model in models
+            else models[0]
+        )
         keep.append(g[g["model_version"].eq(pick)])
     return pd.concat(keep, ignore_index=True) if keep else preds
 
@@ -323,10 +331,14 @@ def advisory_rows(preds: pd.DataFrame, throughput_model: str | None = None) -> p
 def load_reference(root: Path) -> pd.DataFrame | None:
     """Train-only clear-weather ceiling per airport and local hour, as recommend.main reads it."""
     path = root / HOURLY
-    if not path.exists() or not set(REFERENCE_COLUMNS) <= set(pq.read_schema(path).names):
+    if not path.exists() or not set(REFERENCE_COLUMNS) <= set(
+        pq.read_schema(path).names
+    ):
         return None
     ref = _read(path, REFERENCE_COLUMNS)
-    return ref.drop_duplicates(["airport_icao", "airport_local_hour"], ignore_index=True)
+    return ref.drop_duplicates(
+        ["airport_icao", "airport_local_hour"], ignore_index=True
+    )
 
 
 def component_table(rec: dict) -> pd.DataFrame:
@@ -356,7 +368,9 @@ def load_drivers(root: Path, run: str, prediction_ids, top: int = 5) -> list[dic
         return []
     df = _read(path, filter=ds.field("prediction_id").isin(list(prediction_ids)))
     df = df.loc[df["contribution"].abs().sort_values(ascending=False).index].head(top)
-    cols = [c for c in ("feature", "value", "contribution", "contribution_scale") if c in df]
+    cols = [
+        c for c in ("feature", "value", "contribution", "contribution_scale") if c in df
+    ]
     return df[cols].to_dict("records")
 
 
@@ -369,8 +383,12 @@ def brief_timestamps(t: pd.Timestamp, evidence: dict, preds: pd.DataFrame) -> di
     taf = evidence.get("taf")
     out = {
         "as_of_utc": _iso(t),
-        "metar_available_at_utc": _iso((evidence.get("metar") or {}).get("available_at_utc")),
-        "taf_available_at_utc": _iso(taf["bulletin"]["available_at_utc"]) if taf else None,
+        "metar_available_at_utc": _iso(
+            (evidence.get("metar") or {}).get("available_at_utc")
+        ),
+        "taf_available_at_utc": _iso(taf["bulletin"]["available_at_utc"])
+        if taf
+        else None,
         "predictions_generated_at_utc": _iso(preds["generated_at_utc"].max())
         if "generated_at_utc" in preds and len(preds)
         else None,
@@ -424,7 +442,9 @@ def failure_case_view(case: dict) -> dict:
         "advisory_possible": case.get("advisory_possible"),
         "advisory_reason": case.get("advisory_reason"),
         "explanation_status": case.get("explanation_status"),
-        "limitations": [f"{x['code']}: {x['text']}" for x in case.get("limitations", [])],
+        "limitations": [
+            f"{x['code']}: {x['text']}" for x in case.get("limitations", [])
+        ],
         "source_ages_min": known.get("source_ages_min") or {},
         "sources": pd.DataFrame(known.get("sources") or []),
     }
@@ -433,8 +453,16 @@ def failure_case_view(case: dict) -> dict:
 # What actually happened (hindsight only) ----------------------------------------------------
 
 
+def replay_window_is_development(root: Path, t: pd.Timestamp) -> bool:
+    experiment = yaml.safe_load((root / "configs/experiment.yaml").read_text())
+    test_start = pd.Timestamp(experiment["splits"]["test"]["start"], tz="UTC")
+    return t + WINDOW <= test_start
+
+
 def load_replay_outcomes(root: Path, icao: str, t: pd.Timestamp) -> dict:
-    """Realised outcomes for the hours after T. Only the hindsight panel calls this."""
+    """Realised development outcomes, shown only when hindsight is explicitly requested."""
+    if not replay_window_is_development(root, t):
+        raise ValueError("Locked test outcomes are unavailable in development replay")
     hourly = _read(
         root / HOURLY,
         columns=[

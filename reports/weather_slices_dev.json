@@ -1,0 +1,193 @@
+{
+  "scope": "primary cohort; H2 2024 calibration; all four horizons; common support across available throughput models; outcome-side target-hour METAR thunderstorm flag",
+  "confidence_interval": "not calculated; small weather slices are descriptive",
+  "records": [
+    {
+      "airport_icao": "KATL",
+      "thunderstorm": false,
+      "model_version": "baseline_climatology_v1",
+      "count": 17365,
+      "rmse": 8.621361759131199
+    },
+    {
+      "airport_icao": "KATL",
+      "thunderstorm": false,
+      "model_version": "baseline_persistence_v1",
+      "count": 17365,
+      "rmse": 39.24396146381571
+    },
+    {
+      "airport_icao": "KATL",
+      "thunderstorm": false,
+      "model_version": "baseline_schedule_v1",
+      "count": 17365,
+      "rmse": 8.279219081737125
+    },
+    {
+      "airport_icao": "KATL",
+      "thunderstorm": false,
+      "model_version": "baseline_seasonal_persistence_v1",
+      "count": 17365,
+      "rmse": 10.49079505476504
+    },
+    {
+      "airport_icao": "KATL",
+      "thunderstorm": false,
+      "model_version": "lgbm_throughput_v1",
+      "count": 17365,
+      "rmse": 6.711579822247751
+    },
+    {
+      "airport_icao": "KATL",
+      "thunderstorm": true,
+      "model_version": "baseline_climatology_v1",
+      "count": 271,
+      "rmse": 15.905100579160989
+    },
+    {
+      "airport_icao": "KATL",
+      "thunderstorm": true,
+      "model_version": "baseline_persistence_v1",
+      "count": 271,
+      "rmse": 29.82111488507648
+    },
+    {
+      "airport_icao": "KATL",
+      "thunderstorm": true,
+      "model_version": "baseline_schedule_v1",
+      "count": 271,
+      "rmse": 16.376479947671555
+    },
+    {
+      "airport_icao": "KATL",
+      "thunderstorm": true,
+      "model_version": "baseline_seasonal_persistence_v1",
+      "count": 271,
+      "rmse": 17.512884028939098
+    },
+    {
+      "airport_icao": "KATL",
+      "thunderstorm": true,
+      "model_version": "lgbm_throughput_v1",
+      "count": 271,
+      "rmse": 15.072667607176676
+    },
+    {
+      "airport_icao": "KATL",
+      "thunderstorm": null,
+      "model_version": "baseline_climatology_v1",
+      "count": 4,
+      "rmse": 2.8653846153846168
+    },
+    {
+      "airport_icao": "KATL",
+      "thunderstorm": null,
+      "model_version": "baseline_persistence_v1",
+      "count": 4,
+      "rmse": 39.009614199579055
+    },
+    {
+      "airport_icao": "KATL",
+      "thunderstorm": null,
+      "model_version": "baseline_schedule_v1",
+      "count": 4,
+      "rmse": 4.058474325954144
+    },
+    {
+      "airport_icao": "KATL",
+      "thunderstorm": null,
+      "model_version": "baseline_seasonal_persistence_v1",
+      "count": 4,
+      "rmse": 0.0
+    },
+    {
+      "airport_icao": "KATL",
+      "thunderstorm": null,
+      "model_version": "lgbm_throughput_v1",
+      "count": 4,
+      "rmse": 0.4278808582351078
+    },
+    {
+      "airport_icao": "KDFW",
+      "thunderstorm": false,
+      "model_version": "baseline_climatology_v1",
+      "count": 17330,
+      "rmse": 12.913144882930087
+    },
+    {
+      "airport_icao": "KDFW",
+      "thunderstorm": false,
+      "model_version": "baseline_persistence_v1",
+      "count": 17330,
+      "rmse": 37.73274225961409
+    },
+    {
+      "airport_icao": "KDFW",
+      "thunderstorm": false,
+      "model_version": "baseline_schedule_v1",
+      "count": 17330,
+      "rmse": 12.83820352716682
+    },
+    {
+      "airport_icao": "KDFW",
+      "thunderstorm": false,
+      "model_version": "baseline_seasonal_persistence_v1",
+      "count": 17330,
+      "rmse": 11.139264262476685
+    },
+    {
+      "airport_icao": "KDFW",
+      "thunderstorm": false,
+      "model_version": "lgbm_throughput_v1",
+      "count": 17330,
+      "rmse": 8.900772746924602
+    },
+    {
+      "airport_icao": "KDFW",
+      "thunderstorm": true,
+      "model_version": "baseline_climatology_v1",
+      "count": 206,
+      "rmse": 24.018497641840494
+    },
+    {
+      "airport_icao": "KDFW",
+      "thunderstorm": true,
+      "model_version": "baseline_persistence_v1",
+      "count": 206,
+      "rmse": 33.392269903682624
+    },
+    {
+      "airport_icao": "KDFW",
+      "thunderstorm": true,
+      "model_version": "baseline_schedule_v1",
+      "count": 206,
+      "rmse": 22.608275187001045
+    },
+    {
+      "airport_icao": "KDFW",
+      "thunderstorm": true,
+      "model_version": "baseline_seasonal_persistence_v1",
+      "count": 206,
+      "rmse": 28.88376437828342
+    },
+    {
+      "airport_icao": "KDFW",
+      "thunderstorm": true,
+      "model_version": "lgbm_throughput_v1",
+      "count": 206,
+      "rmse": 22.152881582953235
+    }
+  ],
+  "weather_slices_sha256": "c68fb2d1e4159552b5c3d4d1b98a09c9dd1cd9c5e396d73967e38b6b300f45bd",
+  "prediction_and_label_hashes": {
+    "artifacts/baselines_dev/predictions.parquet": "2452427806a5ad40d07588e1122bbece14b1b27e735db03a25187216b1fed099",
+    "artifacts/baselines_flight_dev/predictions.parquet": "35b975a2e41e477bd94c0a46051812c194564d8e4c23549d5c3e174e1021de3e",
+    "artifacts/lgbm_throughput_dev/predictions.parquet": "f1758f76e867f5220e9bf44531706c916a5cf3449acc9ef983f65dfdd7468453",
+    "artifacts/lgbm_delay_dev/predictions.parquet": "58d14959e2c99b4248cdc4147db6590a6e5eee0f3655a685b91665447457360f",
+    "data/labels/labels.parquet": "5e0d6cc15830d071f7a93115228c2523a15f3c68d0e9d4414fe0c21c21c818a0",
+    "data/processed/prediction_requests.parquet": "ed33806cb26b39658328685fea2e8ffced119ad982d21ba4ba69a3526af32288"
+  },
+  "data_mode": "real",
+  "label_version": "0.2.0",
+  "interpretation": "Target-hour weather is an evaluation-only slice. Non-thunderstorm does not mean clear weather. Counts are prediction rows across horizons, not independent hours. Confidence intervals are unavailable."
+}
