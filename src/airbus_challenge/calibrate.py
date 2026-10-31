@@ -16,7 +16,6 @@ from airbus_challenge.evaluate import (
     LABELS,
     SEVERE,
     load_labels,
-    split_of,
 )
 from airbus_challenge.recommend import (
     POLICY_VERSION,
@@ -39,6 +38,7 @@ EVENT_RATIO = 0.70
 MERGE_GAP_H, MATCH_WINDOW_H = 1, 1
 MIN_VALIDATION_N = 30
 HOUR = pd.Timedelta(hours=1)
+RATIO_LABELS = Path("data/labels/ratio_labels_primary.parquet")
 
 
 def in_window(rows: pd.DataFrame, window) -> pd.DataFrame:
@@ -249,7 +249,11 @@ def calibrate(
     predictions: pd.DataFrame, labels: pd.DataFrame, reference: pd.DataFrame | None
 ) -> dict:
     key = ["prediction_id", "target_kind"]
-    rows = predictions.merge(labels[[*key, "y_true", "eligible"]], on=key, how="inner")
+    if predictions.duplicated([*key, "model_version"]).any():
+        raise ValueError("duplicate prediction_id/target_kind/model_version in calibration")
+    rows = predictions.merge(
+        labels[[*key, "y_true", "eligible"]], on=key, how="inner", validate="m:1"
+    )
     rows = rows[rows["eligible"].astype(bool) & rows["estimate"].notna()]
     ratio = labels.loc[labels["target_kind"].eq(CAPACITY_RATIO) & labels["eligible"].astype(bool),
                        ["prediction_id", "y_true"]].rename(columns={"y_true": "actual_ratio"})  # fmt: skip
@@ -287,15 +291,16 @@ def calibrate(
     for model, g in fit[fit["target_kind"].eq(TARGET)].groupby("model_version"):
         margins = out["throughput_interval"][model] = conformal_margins(g)
         a = assess[assess["target_kind"].eq(TARGET) & assess["model_version"].eq(model)]
-        if reference is None:
+        reason = "no_reference" if reference is None else (
+            "missing_capacity_ratio_labels" if ratio.empty else None
+        )
+        if reason is not None:
             out["throughput_alert"][model] = {
-                "act_ratio": None,
-                "reason": "no_reference",
-                "watch_ratio": RATIO_WATCH,
+                "act_ratio": None, "reason": reason, "watch_ratio": RATIO_WATCH,
             }
             continue
         margin = {i: v.get("margin") for i, v in margins.items()}
-        a = a.merge(ratio, on="prediction_id", how="inner")
+        a = a.merge(ratio, on="prediction_id", how="inner", validate="m:1")
         a = a.assign(p10_widened=a["p10"] - a["airport_icao"].map(margin).astype(float),
                      p95=ceiling(a, reference))  # fmt: skip
         a = a[a["p95"].gt(0)]
@@ -311,14 +316,45 @@ def calibrate(
     return out
 
 
+def prediction_paths(
+    runs: list[str], artifacts: Path, airports: list[str] | None,
+    predictions_path: Path | None = None,
+) -> dict[str, Path]:
+    paths = {}
+    for n, run_id in enumerate(runs):
+        run_dir = artifacts / run_id
+        path = run_dir / "predictions.parquet"
+        manifest_path = run_dir / "manifest.json"
+        if airports is not None and manifest_path.exists():
+            source = json.loads(manifest_path.read_text()).get("source_calibration_predictions")
+            if source:
+                source = Path(source)
+                path = source if source.is_absolute() else run_dir / source
+        paths[run_id] = Path(predictions_path) if n == 0 and predictions_path is not None else path
+    return paths
+
+
 def load(
-    runs: list[str], labels_path: Path, artifacts: Path = ARTIFACTS
+    runs: list[str], labels_path: Path, artifacts: Path = ARTIFACTS,
+    airports: list[str] | None = None, predictions_path: Path | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    if airports is not None and not airports:
+        raise ValueError("calibration airports must not be empty")
+    paths = prediction_paths(runs, artifacts, airports, predictions_path)
+    filters = [("target_start_utc", ">=", FIT[0]), ("target_start_utc", "<", ASSESS[1])]
+    if airports is not None:
+        filters.append(("airport_icao", "in", airports))
+    columns = ["prediction_id", "target_kind", "model_version", "airport_icao",
+               "target_start_utc", "horizon_h", "estimate", "p10", "p90"]
     preds = pd.concat(
-        [pd.read_parquet(artifacts / r / "predictions.parquet") for r in runs],
+        [pd.read_parquet(path, columns=columns, filters=filters) for path in paths.values()],
         ignore_index=True,
     )
-    preds = preds[split_of(preds["target_start_utc"]).eq("calibration")]
+    if airports is not None:
+        preds = preds[preds["airport_icao"].isin(airports)]
+        absent = set(airports) - set(preds["airport_icao"])
+        if absent:
+            raise ValueError(f"no calibration predictions for airports {sorted(absent)}")
     # Filtered to calibration-split ids at read, so outcomes outside H2 2024 are never loaded.
     return preds, load_labels(labels_path, preds["prediction_id"].unique().tolist())
 
@@ -329,26 +365,49 @@ def run(
     labels_path=LABELS,
     reference_path=HOURLY,
     artifacts=ARTIFACTS,
+    airports: list[str] | None = None,
+    predictions_path: Path | None = None,
+    ratio_labels_path: Path | None = RATIO_LABELS,
 ) -> dict:
     runs = [run_id, *extra]
-    preds, labels = load(runs, Path(labels_path), Path(artifacts))
+    paths = prediction_paths(runs, Path(artifacts), airports, predictions_path)
+    preds, labels = load(runs, Path(labels_path), Path(artifacts), airports, predictions_path)
+    label_sources = {"labels": {"path": str(labels_path), "label_versions": sorted(
+        labels.get("label_version", pd.Series(dtype=str)).dropna().astype(str).unique()
+    )}}
+    supplemental_ratio = None
+    throughput_ids = preds.loc[preds["target_kind"].eq(TARGET), "prediction_id"].unique().tolist()
+    if (throughput_ids and not labels["target_kind"].eq(CAPACITY_RATIO).any()
+            and ratio_labels_path is not None and Path(ratio_labels_path).exists()):
+        supplemental_ratio = Path(ratio_labels_path)
+        ratio_labels = pd.read_parquet(supplemental_ratio, filters=[
+            ("prediction_id", "in", throughput_ids), ("target_kind", "==", CAPACITY_RATIO),
+        ])
+        label_sources["ratio_labels"] = {"path": str(supplemental_ratio), "label_versions": sorted(
+            ratio_labels.get("label_version", pd.Series(dtype=str)).dropna().astype(str).unique()
+        )}
+        labels = pd.concat([labels, ratio_labels], ignore_index=True)
     ref_path = Path(reference_path)
     reference = (pd.read_parquet(ref_path, columns=REFERENCE_COLUMNS).drop_duplicates(["airport_icao", "airport_local_hour"])
                  if ref_path.exists() else None)  # fmt: skip
     hashes = {
-        f"predictions:{r}": sha256(Path(artifacts) / r / "predictions.parquet")
-        for r in runs
+        f"predictions:{r}": sha256(path) for r, path in paths.items()
     }
     hashes["labels"] = sha256(Path(labels_path))
     hashes["reference"] = sha256(ref_path) if ref_path.exists() else None
+    if supplemental_ratio is not None:
+        hashes["ratio_labels"] = sha256(supplemental_ratio)
     result = {
         "policy_version": POLICY_VERSION,
         "decision": "docs/DECISIONS.md WP-D7",
         "runs": runs,
+        "prediction_paths": {run: str(path) for run, path in paths.items()},
+        "calibration_airports": sorted(preds["airport_icao"].unique()),
         "calibration_fit_utc": [t.isoformat() for t in FIT],
         "threshold_assessment_utc": [t.isoformat() for t in ASSESS],
         "alert_rule": "alert when calibrated probability >= threshold; null threshold never alerts",
         "input_hashes": hashes,
+        "label_sources": label_sources,
     } | calibrate(preds, labels, reference)
     path = Path(artifacts) / run_id / "calibration.json"
     path.write_text(json.dumps(result, indent=2, default=str))
@@ -359,8 +418,17 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run", required=True)
     parser.add_argument("--runs", nargs="*", default=[])
+    parser.add_argument("--labels", type=Path, default=LABELS)
+    parser.add_argument("--reference", type=Path, default=HOURLY)
+    parser.add_argument("--artifacts", type=Path, default=ARTIFACTS)
+    parser.add_argument("--airports", nargs="+")
+    parser.add_argument("--predictions", type=Path)
+    parser.add_argument("--ratio-labels", type=Path, default=RATIO_LABELS)
     args = parser.parse_args()
-    out = run(args.run, args.runs)
+    out = run(
+        args.run, args.runs, args.labels, args.reference, args.artifacts, args.airports,
+        args.predictions, args.ratio_labels,
+    )
     print(
         json.dumps(
             {k: out[k] for k in ("severe_delay_thresholds", "throughput_alert")},

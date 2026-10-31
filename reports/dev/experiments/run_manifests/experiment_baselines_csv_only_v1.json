@@ -1,0 +1,39 @@
+{
+  "run_id": "experiment_baselines_csv_only_v1",
+  "producer": "airbus_challenge.experiment_baselines",
+  "commit": "9a56d2fa96635ee3eea30f683fe7af6e99f5ae44",
+  "commit_dirty": true,
+  "data_mode": "real",
+  "data_snapshot_id": "1caed43e83bc75b409656248320b70d9d43720f80dff348300b379a02ec83980",
+  "cohort_version": "csv_only_v1",
+  "tasks": [
+    "severe_delay"
+  ],
+  "experiment": "csv_only",
+  "train_airports": [
+    "KATL",
+    "KDFW"
+  ],
+  "scoring_airports": [
+    "KATL",
+    "KDFW"
+  ],
+  "fit_cutoff_utc": "2024-01-01T00:00:00+00:00",
+  "prediction_requests_sha256": "b3a1a7a81b0449e5c04a5436750002d6c09b03baf9162aae217b825b95e3554c",
+  "training_labels_sha256": "e619fa8ff64167ea6ca2040639421b80d9124b09829231aa38ca89b192a601c3",
+  "labels_sha256": "843638d4e51d98753ef866aa440e9d1034d99983005e7af1c30d69a495cc6ff3",
+  "airport_hourly_sha256": null,
+  "fit_availability": "simulated; outcome_available_at_utc <= fit cutoff",
+  "feed_latency_h": 0,
+  "schedule_knowledge_basis": "retrospective_schedule",
+  "transfer_schedule_fit": null,
+  "rows": 102752,
+  "runtime_s": 0.466,
+  "peak_rss_mb": 375.546875,
+  "status_counts": {
+    "baseline_conditional_rate_v1|departure_delay_gt45|available": 25688,
+    "baseline_logistic_v1|departure_delay_gt45|available": 25688,
+    "baseline_conditional_rate_v1|cancellation|available": 25688,
+    "baseline_logistic_v1|cancellation|available": 25688
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "run_id": "ratio_baselines_dev",
+  "producer": "airbus_challenge.extra_baselines",
+  "producer_version": "extra-baseline-v1",
+  "schema_version": "0.1.0",
+  "commit": "2f5c7ed8b6c99463c9fcdc55ef6ab471df4197cc",
+  "commit_dirty": false,
+  "approved_by": null,
+  "data_mode": "real",
+  "data_snapshot_id": "1caed43e83bc75b409656248320b70d9d43720f80dff348300b379a02ec83980",
+  "airport_hourly_sha256": "59b62d1c9d4bf89f2ed2ac2d410d8d6cf48fdafeb9375100de8df7488e80efa7",
+  "prediction_requests_sha256": "ed33806cb26b39658328685fea2e8ffced119ad982d21ba4ba69a3526af32288",
+  "uv_lock_sha256": "9f477d3f3783c64e585539e4d551bda8c642cb758fde67a0a8da9e7af18f515b",
+  "feed_latency_h": 0,
+  "fit_split": {
+    "start": "2023-01-01",
+    "end": "2024-01-01"
+  },
+  "fit_cutoff_utc": "2024-01-01T00:00:00+00:00",
+  "fit_availability": "simulated: train outcomes are treated as known at the cutoff, though BTS publishes months later",
+  "experiment": "primary",
+  "target": "throughput_over_clear_weather_p95",
+  "target_label": "arrival throughput (AAR proxy) over clear-weather ceiling",
+  "clear_weather_reference_id": [
+    "afe800651beebff511685fbab625741b5b0cf730a3fd72b9493f58e6c2dc255d"
+  ],
+  "train_airports": [
+    "KATL",
+    "KDFW"
+  ],
+  "target_start_min_utc": "2024-01-01T03:00:00+00:00",
+  "target_start_max_utc": "2024-12-31T23:00:00+00:00",
+  "rows": 140424,
+  "status_counts": {
+    "baseline_climatology_v1": {
+      "available": 70212,
+      "unavailable": 0
+    },
+    "baseline_persistence_v1": {
+      "available": 70084,
+      "unavailable": 128
+    }
+  }
+}

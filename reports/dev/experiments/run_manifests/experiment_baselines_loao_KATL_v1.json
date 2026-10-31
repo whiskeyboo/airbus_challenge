@@ -1,0 +1,43 @@
+{
+  "run_id": "experiment_baselines_loao_KATL_v1",
+  "producer": "airbus_challenge.experiment_baselines",
+  "commit": "9a56d2fa96635ee3eea30f683fe7af6e99f5ae44",
+  "commit_dirty": true,
+  "data_mode": "real",
+  "data_snapshot_id": "1caed43e83bc75b409656248320b70d9d43720f80dff348300b379a02ec83980",
+  "cohort_version": "loao_KATL_v1",
+  "tasks": [
+    "throughput"
+  ],
+  "experiment": "leave_out_KATL",
+  "train_airports": [
+    "KDFW"
+  ],
+  "scoring_airports": [
+    "KATL"
+  ],
+  "fit_cutoff_utc": "2024-01-01T00:00:00+00:00",
+  "prediction_requests_sha256": "d44cb7b19e8accb2805506bdcef2c47a758c19c66b5997322b0334fccd35b9f0",
+  "training_labels_sha256": "65bfbc4aab30bbd1b8b0123b737500650b466dd0a32ac4f20f9e7ddc1f548930",
+  "labels_sha256": "86d58db75da01aeb330d7805e326b45d8b2f20f582b8db587986586652b363f4",
+  "airport_hourly_sha256": "7cc39a9d381d63f130a47cd674b4ccebc1a29ddc4143458eb51180f4e63b8dc2",
+  "fit_availability": "simulated; outcome_available_at_utc <= fit cutoff",
+  "feed_latency_h": 0,
+  "schedule_knowledge_basis": "retrospective_schedule",
+  "transfer_schedule_fit": {
+    "source_airports": [
+      "KDFW"
+    ],
+    "slope": 0.6983220725126225,
+    "intercept": 9.30470262014113,
+    "n_train": 8750
+  },
+  "rows": 70212,
+  "runtime_s": 1.826,
+  "peak_rss_mb": 411.265625,
+  "status_counts": {
+    "baseline_persistence_v1|reporting_carrier_touchdowns|available": 35046,
+    "baseline_persistence_v1|reporting_carrier_touchdowns|unavailable": 60,
+    "baseline_transfer_schedule_v1|reporting_carrier_touchdowns|available": 35106
+  }
+}

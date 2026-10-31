@@ -1,0 +1,166 @@
+{
+  "run_id": "lgbm_throughput_dev_leave_out_KATL",
+  "producer": "airbus_challenge.experiments",
+  "commit": "9a56d2fa96635ee3eea30f683fe7af6e99f5ae44",
+  "commit_dirty": true,
+  "data_mode": "real",
+  "data_snapshot_id": "adfb8b104f96880a",
+  "cohort_version": "loao_KATL_v1",
+  "experiment": "leave_out_KATL",
+  "variant": "runway",
+  "fit_split": "train",
+  "fit_cutoff_utc": "2024-01-01T00:00:00+00:00",
+  "early_stopping_split": "validation",
+  "early_stopping_start_utc": "2024-01-01T00:00:00+00:00",
+  "selection_policy": "2023 parameter fitting; source-airport H1 2024 validation early stopping",
+  "selection_data_end_utc": "2024-07-01T00:00:00+00:00",
+  "validation_limitation": "Validation used for early stopping; validation metrics are retrospective model-selection diagnostics, not prospective performance",
+  "predictor_difference": "LOAO drops airport category and airport-specific 2023 schedule normalizers",
+  "source_calibration_predictions": "source_calibration_predictions.parquet",
+  "train_airports": [
+    "KDFW"
+  ],
+  "scoring_airports": [
+    "KATL"
+  ],
+  "calibration_airports": [
+    "KDFW"
+  ],
+  "held_out_calibration": false,
+  "prediction_requests_sha256": "d44cb7b19e8accb2805506bdcef2c47a758c19c66b5997322b0334fccd35b9f0",
+  "labels_sha256": "86d58db75da01aeb330d7805e326b45d8b2f20f582b8db587986586652b363f4",
+  "training_labels_sha256": "65bfbc4aab30bbd1b8b0123b737500650b466dd0a32ac4f20f9e7ddc1f548930",
+  "feature_sha256": {
+    "feature_snapshots.parquet": "5abdf47f39999150dcf29e6c858a448043ef4763eed1d46a92cce67ea32227de",
+    "demand_features.parquet": "4fdc770c2157aa11261b24472c4c2df1d29fffb7424864e9d1430b80a2eed013"
+  },
+  "registry_sha256": "abb975e84595c9dcd98bf2a762050f119fac03009af7c0f4e5f0445586c80435",
+  "params": {
+    "objective": "regression",
+    "learning_rate": 0.05,
+    "num_leaves": 31,
+    "min_data_in_leaf": 50,
+    "feature_fraction": 0.8,
+    "bagging_fraction": 0.8,
+    "bagging_freq": 1,
+    "lambda_l2": 1.0,
+    "seed": 42,
+    "deterministic": true,
+    "num_threads": 4,
+    "verbose": -1
+  },
+  "max_rounds": 2000,
+  "max_binary_training_rows": 1500000,
+  "fits": {
+    "reporting_carrier_touchdowns": {
+      "selected_rounds": [
+        140,
+        127,
+        143
+      ],
+      "fit_rows": 35000,
+      "selection_rows": 17452,
+      "refit_rows": 0,
+      "features": [
+        "horizon_h",
+        "target_hour_utc",
+        "target_hour_local",
+        "target_weekday_local",
+        "target_month_local",
+        "metar_age_min",
+        "metar_wind_status",
+        "metar_wind_kt",
+        "metar_gust_kt",
+        "metar_headwind_kt_hdg",
+        "metar_tailwind_kt_hdg",
+        "metar_tailwind_kt_rec",
+        "metar_crosswind_kt",
+        "metar_headwind_kt_best",
+        "metar_best_end",
+        "metar_gust_crosswind_kt",
+        "metar_gust_tailwind_kt_hdg",
+        "metar_gust_tailwind_kt_rec",
+        "metar_visibility_sm",
+        "metar_ceiling_ft",
+        "metar_ceiling_none",
+        "metar_temp_dewpoint_spread_c",
+        "metar_pressure_tendency_3h_hpa",
+        "metar_reports_3h",
+        "metar_wind_max_kt_3h",
+        "metar_gust_max_kt_3h",
+        "metar_visibility_min_sm_1h",
+        "metar_visibility_min_sm_3h",
+        "metar_ceiling_min_ft_3h",
+        "metar_precip_max_mm_1h",
+        "metar_precip_max_mm_6h",
+        "metar_ts_3h",
+        "metar_fz_3h",
+        "metar_sn_3h",
+        "metar_fg_3h",
+        "metar_ra_3h",
+        "taf_age_min",
+        "taf_lead_h",
+        "taf_is_amendment",
+        "taf_wind_status",
+        "taf_wind_max_kt",
+        "taf_gust_max_kt",
+        "taf_crosswind_max_kt",
+        "taf_tailwind_max_kt_hdg",
+        "taf_tailwind_max_kt_rec",
+        "taf_gust_crosswind_max_kt",
+        "taf_visibility_min_sm",
+        "taf_ceiling_min_ft",
+        "taf_ceiling_none",
+        "taf_tempo",
+        "taf_prob_max",
+        "taf_cond_visibility_min_sm",
+        "taf_cond_ceiling_min_ft",
+        "taf_cond_gust_max_kt",
+        "taf_cond_crosswind_max_kt",
+        "taf_ts_prevailing",
+        "taf_ts_conditional",
+        "sched_arr_h0",
+        "sched_arr_hm1",
+        "sched_arr_hp1",
+        "sched_dep_h0",
+        "sched_dep_hm1",
+        "sched_dep_hp1",
+        "sched_arr_3h",
+        "sched_dep_3h",
+        "sched_arr_unresolved_h0",
+        "sched_dep_unresolved_h0"
+      ],
+      "categories": {
+        "metar_wind_status": [
+          "calm",
+          "directional",
+          "missing",
+          "variable"
+        ],
+        "metar_best_end": [
+          "hdg",
+          "rec"
+        ],
+        "taf_wind_status": [
+          "calm",
+          "directional",
+          "variable"
+        ]
+      }
+    }
+  },
+  "model_versions": [
+    "lgbm_throughput_loao_v1"
+  ],
+  "targets": [
+    "reporting_carrier_touchdowns"
+  ],
+  "rows": 35106,
+  "status_counts": {
+    "available": 34790,
+    "unavailable": 316
+  },
+  "availability": "simulated label release; retrospective schedule; optional operations explicitly simulated",
+  "runtime_s": 7.516,
+  "peak_rss_mb": 3049.4
+}
