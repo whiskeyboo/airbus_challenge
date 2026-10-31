@@ -125,7 +125,7 @@ def test_unseen_group_and_unknown_airport_fall_back_with_reason():
     predictions, summary = run_baselines(requests, labels)
     rate = predictions[predictions["model_version"].eq(CONDITIONAL_RATE)]
     unseen = rate[rate["airport_icao"].eq("KATL")]
-    assert unseen["status"].eq("degraded").all()
+    assert unseen["status"].eq("available").all()
     assert unseen["reason_codes"].map(lambda r: "unseen_group_airport_rate" in r).all()
     for target, rows in unseen.groupby("target_kind"):
         assert rows["estimate"].eq(summary[target]["airport_rate"]["KATL"]).all()
@@ -141,7 +141,8 @@ def test_rare_group_falls_back_to_airport_rate(fixture_tables):
     rare = rate["reason_codes"].map(lambda r: "rare_group_airport_rate" in r)
     full = rate["reason_codes"].map(len).eq(1)
     assert MIN_GROUP_N > 0 and full.any()
-    assert rate.loc[rare | ~full, "status"].eq("degraded").all()
+    assert rate.loc[rare | ~full, "status"].eq("available").all()
+    assert not rate["status"].eq("degraded").any()
 
 
 def test_every_in_scope_request_gets_one_row_per_model_and_target(fixture_tables):

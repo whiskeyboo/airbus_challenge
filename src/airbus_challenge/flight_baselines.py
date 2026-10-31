@@ -140,11 +140,9 @@ def logistic(
 
 def _predictions(scored, target, model, estimate, reasons) -> pd.DataFrame:
     reasons = [[RETROSPECTIVE_SCHEDULE, *r] for r in reasons]
-    status = np.where(
-        np.isnan(estimate),
-        "unavailable",
-        np.where([len(r) > 1 for r in reasons], "degraded", "available"),
-    )
+    # The airport-rate fallback is part of the declared smoothing, not a
+    # validated degraded mode (DATA_CONTRACTS §8), so it stays available.
+    status = np.where(np.isnan(estimate), "unavailable", "available")
     return scored[REQUEST_COLUMNS].assign(
         target_kind=target,
         estimate=estimate,
