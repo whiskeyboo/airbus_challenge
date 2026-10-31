@@ -101,6 +101,12 @@ def missing(recommendation: dict, drivers: list[dict], timestamps: dict) -> list
     return out
 
 
+def _interval(c: dict) -> str:
+    if c["p10"] is None or c["p90"] is None:
+        return " (no interval)"
+    return f" (p10 {c['p10']}, p90 {c['p90']})"
+
+
 def template(f: dict) -> str:
     level = f["level"].upper()
     lines = [
@@ -112,7 +118,7 @@ def template(f: dict) -> str:
         elif c["kind"] == "throughput":
             lines.append(
                 f"Arrival throughput (AAR proxy), hour {c['target_start_utc']} (h={c['horizon_h']}): "
-                f"{c['estimate']} {c['unit']} (p10 {c['p10']}, p90 {c['p90']}), "
+                f"{c['estimate']} {c['unit']}{_interval(c)}, "
                 f"{c['ratio_to_clear_weather_p95']} of the clear-weather p95 {c['clear_weather_p95']}."
             )
         else:
