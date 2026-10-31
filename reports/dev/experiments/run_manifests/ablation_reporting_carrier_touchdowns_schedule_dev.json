@@ -1,0 +1,109 @@
+{
+  "run_id": "ablation_reporting_carrier_touchdowns_schedule_dev",
+  "producer": "airbus_challenge.experiments",
+  "commit": "9a56d2fa96635ee3eea30f683fe7af6e99f5ae44",
+  "commit_dirty": true,
+  "data_mode": "real",
+  "data_snapshot_id": "adfb8b104f96880a",
+  "cohort_version": "retrospective_schedule_v1",
+  "experiment": "primary",
+  "variant": "schedule",
+  "fit_split": "train",
+  "fit_cutoff_utc": "2024-01-01T00:00:00+00:00",
+  "early_stopping_split": "validation",
+  "early_stopping_start_utc": "2024-01-01T00:00:00+00:00",
+  "selection_policy": "2023 parameter fitting; source-airport H1 2024 validation early stopping",
+  "selection_data_end_utc": "2024-07-01T00:00:00+00:00",
+  "validation_limitation": "Validation used for early stopping; validation metrics are retrospective model-selection diagnostics, not prospective performance",
+  "predictor_difference": null,
+  "source_calibration_predictions": null,
+  "train_airports": [
+    "KATL",
+    "KDFW"
+  ],
+  "scoring_airports": [
+    "KATL",
+    "KDFW"
+  ],
+  "calibration_airports": [
+    "KATL",
+    "KDFW"
+  ],
+  "held_out_calibration": false,
+  "prediction_requests_sha256": "ed33806cb26b39658328685fea2e8ffced119ad982d21ba4ba69a3526af32288",
+  "labels_sha256": "5e0d6cc15830d071f7a93115228c2523a15f3c68d0e9d4414fe0c21c21c818a0",
+  "training_labels_sha256": "b9e5bf968fbf9c82995818eae608596329cf54881750e800216547fd543eb72b",
+  "feature_sha256": {
+    "feature_snapshots.parquet": "fe85021607f2709b869142b5b6d74d8a70b34d798ef655ffb8a79961b244583f",
+    "demand_features.parquet": "e7fb22e89dac76e38062d286f210f660477b46be44c2fdafd9d5a216f04a1640"
+  },
+  "registry_sha256": "abb975e84595c9dcd98bf2a762050f119fac03009af7c0f4e5f0445586c80435",
+  "params": {
+    "objective": "regression",
+    "learning_rate": 0.05,
+    "num_leaves": 31,
+    "min_data_in_leaf": 50,
+    "feature_fraction": 0.8,
+    "bagging_fraction": 0.8,
+    "bagging_freq": 1,
+    "lambda_l2": 1.0,
+    "seed": 42,
+    "deterministic": true,
+    "num_threads": 4,
+    "verbose": -1
+  },
+  "max_rounds": 2000,
+  "max_binary_training_rows": 1500000,
+  "fits": {
+    "reporting_carrier_touchdowns": {
+      "selected_rounds": [
+        83,
+        370,
+        159
+      ],
+      "fit_rows": 70000,
+      "selection_rows": 34872,
+      "refit_rows": 0,
+      "features": [
+        "horizon_h",
+        "airport_icao",
+        "target_hour_utc",
+        "target_hour_local",
+        "target_weekday_local",
+        "target_month_local",
+        "sched_arr_h0",
+        "sched_arr_hm1",
+        "sched_arr_hp1",
+        "sched_dep_h0",
+        "sched_dep_hm1",
+        "sched_dep_hp1",
+        "sched_arr_3h",
+        "sched_dep_3h",
+        "sched_arr_unresolved_h0",
+        "sched_dep_unresolved_h0",
+        "sched_arr_2023_local_hour_mean",
+        "sched_arr_vs_2023_local_hour_mean"
+      ],
+      "categories": {
+        "airport_icao": [
+          "KATL",
+          "KDFW"
+        ]
+      }
+    }
+  },
+  "model_versions": [
+    "lgbm_reporting_carrier_touchdowns_schedule_v1"
+  ],
+  "targets": [
+    "reporting_carrier_touchdowns"
+  ],
+  "rows": 70212,
+  "status_counts": {
+    "available": 69840,
+    "unavailable": 372
+  },
+  "availability": "simulated label release; retrospective schedule; optional operations explicitly simulated",
+  "runtime_s": 8.439,
+  "peak_rss_mb": 1439.1
+}

@@ -59,6 +59,7 @@ SEASONAL = "baseline_seasonal_persistence_v1"
 CLIMATOLOGY = "baseline_climatology_v1"
 CONDITIONAL_RATE = "baseline_conditional_rate_v1"
 LOGISTIC = "baseline_logistic_v1"
+TRANSFER_SCHEDULE = "baseline_transfer_schedule_v1"
 ASSUMPTIONS = {SIMULATED_FEED, RETROSPECTIVE_SCHEDULE}
 EXCLUSION_REASONS = {
     "cancelled",
@@ -129,6 +130,7 @@ BASELINE_COLOURS = {
     "baseline_schedule_v1": "#e87ba4",
     CONDITIONAL_RATE: "#1baf7a",
     LOGISTIC: "#eb6834",
+    TRANSFER_SCHEDULE: "#e87ba4",
 }
 CANDIDATE_COLOURS = ["#2a78d6", "#008300", "#6250d6"]
 SURFACE = "#fcfcfb"
@@ -137,17 +139,19 @@ MUTED_INK = "#52514e"
 GRID = "#e6e5e1"
 
 
-def required_baselines(target: str) -> tuple[str, str]:
+def required_baselines(target: str, transfer: bool = False) -> tuple[str, str]:
+    if transfer and target not in BINARY:
+        return PERSISTENCE, TRANSFER_SCHEDULE
     return (
         (CONDITIONAL_RATE, LOGISTIC) if target in BINARY else (PERSISTENCE, CLIMATOLOGY)
     )
 
 
-def skill_baselines(target: str) -> tuple[str, ...]:
+def skill_baselines(target: str, transfer: bool = False) -> tuple[str, ...]:
     # Seasonal persistence is not required, but the write-up leads with it
     # because ordinary persistence is weak at 3-12 h.
-    required = required_baselines(target)
-    return required if target in BINARY else (*required, SEASONAL)
+    required = required_baselines(target, transfer)
+    return required if target in BINARY or transfer else (*required, SEASONAL)
 
 
 def is_baseline(models: pd.Series) -> pd.Series:
@@ -220,6 +224,7 @@ def scoring_scope(
     predictions: pd.DataFrame,
     requests: pd.DataFrame,
     cutoffs: dict[str, pd.Timestamp],
+    scoring_airports: list[str] | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     # Rows issued before the latest fit cutoff among a target's runs would be
     # in-sample for that run, so they are dropped for every model, baselines too.
@@ -227,6 +232,11 @@ def scoring_scope(
     # check_requests and the drop, each model scores exactly the same rows.
     train_end = split_bounds("train")[1]
     requests = requests.assign(split=split_of(requests["target_start_utc"]))
+    if scoring_airports is not None:
+        outside = set(predictions["airport_icao"]) - set(scoring_airports)
+        if outside:
+            raise ValueError(f"predictions outside scoring airports {sorted(outside)}")
+        requests = requests[requests["airport_icao"].isin(scoring_airports)]
     keep = pd.Series(False, index=predictions.index)
     scope = []
     for (task, cohort, target), group in predictions.groupby(SCOPE_KEY):
@@ -277,7 +287,8 @@ def check_baselines(predictions: pd.DataFrame) -> None:
         candidates = ids[~is_baseline(ids.index.to_series())]
         if candidates.empty:
             continue
-        required = required_baselines(cell[2])
+        transfer = str(cell[1]).startswith("loao_") or TRANSFER_SCHEDULE in ids.index
+        required = required_baselines(cell[2], transfer)
         missing = set(required) - set(ids.index)
         if missing:
             raise ValueError(f"{cell}: a model needs baselines {sorted(missing)}")
@@ -387,8 +398,15 @@ def check_experiment(
     airports = set(predictions["airport_icao"])
     if airports != {held_out}:
         raise ValueError(f"{experiment} scores only {held_out}, got {sorted(airports)}")
-    candidates = predictions.loc[~is_baseline(predictions["model_version"]), "run"]
-    for run in candidates.unique():
+    if predictions["target_kind"].eq(CAPACITY_RATIO).any():
+        raise ValueError("strict leave-one-airport-out omits the capacity ratio")
+    tagged = {c for c in cohorts if c.startswith("loao_")}
+    if tagged and tagged != {f"loao_{held_out}_v1"}:
+        raise ValueError(f"{experiment} has mismatched LOAO cohorts {sorted(tagged)}")
+    learned = predictions.loc[
+        ~predictions["model_version"].isin([PERSISTENCE, SEASONAL]), "run"
+    ]
+    for run in learned.unique():
         train = manifests[run].get("train_airports")
         if train is None:
             raise ValueError(f"{run}: manifest needs train_airports for {experiment}")
@@ -630,17 +648,19 @@ def squared_errors(scored: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def baseline_support(squared: pd.DataFrame, model: str, target: str) -> pd.DataFrame:
+def baseline_support(
+    squared: pd.DataFrame, model: str, target: str, transfer: bool = False
+) -> pd.DataFrame:
     if model not in squared:
         return squared.iloc[:0]
-    columns = dict.fromkeys([model, *skill_baselines(target)])
+    columns = dict.fromkeys([model, *skill_baselines(target, transfer)])
     return squared[[c for c in columns if c in squared]].dropna()
 
 
 def skill_metrics(
-    support: pd.DataFrame, days: pd.Series, model: str, target: str
+    support: pd.DataFrame, days: pd.Series, model: str, target: str, transfer: bool = False
 ) -> list[dict]:
-    baselines = [b for b in skill_baselines(target) if b != model]
+    baselines = [b for b in skill_baselines(target, transfer) if b != model]
     if support.empty:
         names = {f"skill_vs_{b}": "share" for b in baselines}
         return null_metrics(names, "no_predicted_rows")
@@ -715,6 +735,9 @@ def evaluate_target(frame: pd.DataFrame, basis: dict[str, list[str]]) -> list[di
     split, target = frame["split"].iloc[0], frame["target_kind"].iloc[0]
     binary = target in BINARY
     models = sorted(frame["model_version"].unique())
+    transfer = str(frame["cohort_version"].iloc[0]).startswith("loao_") or (
+        TRANSFER_SCHEDULE in models
+    )
     airports = [*sorted(frame["airport_icao"].unique()), POOLED]
     horizons = [*sorted(frame["horizon_h"].unique()), ALL_HORIZONS]
     empty = null_metrics(
@@ -762,10 +785,10 @@ def evaluate_target(frame: pd.DataFrame, basis: dict[str, list[str]]) -> list[di
             records += _rows(identity, place, model, basis, slice_name, metrics, counts)
         for model in models:
             own = cell[cell["model_version"].eq(model)]
-            support = baseline_support(squared, model, target)
+            support = baseline_support(squared, model, target, transfer)
             rows = own[own["prediction_id"].isin(support.index)]
             counts = _cell_counts(own, rows, binary)
-            skill = skill_metrics(support, days, model, target)
+            skill = skill_metrics(support, days, model, target, transfer)
             records += _rows(
                 identity, place, model, basis, "baseline_support", skill, counts
             )
@@ -1233,7 +1256,15 @@ def main(
     if cohorts:
         requests = requests[requests["cohort_version"].isin(cohorts)]
     check_requests(predictions, requests)
-    in_scope, scope = scoring_scope(predictions, requests, cutoffs)
+    scoring_airports = None
+    if experiment.startswith("leave_out_"):
+        check_experiment(experiment, predictions, manifests)
+        scoring_airports = [experiment.removeprefix("leave_out_")]
+        for run, manifest in manifests.items():
+            declared = manifest.get("scoring_airports")
+            if declared is not None and set(declared) != set(scoring_airports):
+                raise ValueError(f"{run}: scoring_airports disagrees with {experiment}")
+    in_scope, scope = scoring_scope(predictions, requests, cutoffs, scoring_airports)
     check_baselines(in_scope)
     check_label_keys(labels_path, in_scope)
     modes = (
@@ -1343,14 +1374,16 @@ def cli(argv: list[str] | None = None) -> Path:
     parser.add_argument("--experiment", default="primary", choices=LOCKED_EXPERIMENTS)
     parser.add_argument("--cohorts", nargs="+")
     parser.add_argument("--requests", type=Path)
+    parser.add_argument("--labels", type=Path)
     parser.add_argument("--reports", type=Path)
     args = parser.parse_args(argv)
-    if args.locked_test and (args.reports or args.requests):
-        parser.error("--locked-test uses the default --reports and --requests")
+    if args.locked_test and (args.reports or args.requests or args.labels):
+        parser.error("--locked-test uses the default --reports, --requests and --labels")
     default = "baselines_locked_test" if args.locked_test else "baselines_dev"
     return main(
         args.runs or [default],
         requests_path=args.requests,
+        labels_path=args.labels,
         reports=args.reports,
         locked_test=args.locked_test,
         approved_by=args.approved_by,

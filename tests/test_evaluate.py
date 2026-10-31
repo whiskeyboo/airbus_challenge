@@ -1593,7 +1593,7 @@ def test_locked_main_refuses_non_canonical_paths(tmp_path, clean_git, moved):
     assert not list(tmp_path.rglob("metrics*.json"))
 
 
-@pytest.mark.parametrize("flag", ["--reports", "--requests"])
+@pytest.mark.parametrize("flag", ["--reports", "--requests", "--labels"])
 def test_the_locked_cli_keeps_the_default_paths(monkeypatch, flag):
     def never(*args, **kwargs):
         raise AssertionError("main ran")
@@ -1606,8 +1606,10 @@ def test_the_locked_cli_keeps_the_default_paths(monkeypatch, flag):
 def test_the_dev_cli_passes_other_paths_through(monkeypatch, tmp_path):
     seen = {}
     monkeypatch.setattr(evaluate, "main", lambda runs, **kwargs: seen.update(kwargs))
-    evaluate.cli(["--reports", str(tmp_path), "--requests", str(tmp_path / "r")])
+    evaluate.cli(["--reports", str(tmp_path), "--requests", str(tmp_path / "r"),
+                  "--labels", str(tmp_path / "l")])
     assert (seen["reports"], seen["requests_path"]) == (tmp_path, tmp_path / "r")
+    assert seen["labels_path"] == tmp_path / "l"
     assert "ledger" not in seen
 
 
@@ -2147,3 +2149,80 @@ def test_throughput_skill_is_also_reported_against_seasonal_persistence():
     plain = records_of(throughput_table(), labels_for(throughput_table(), [10.0, 20.0]))
     row = record(plain, metric=f"skill_vs_{seasonal}", **airport)
     assert row["value"] is None and row["reason"] == "baseline_absent"
+
+
+def test_transfer_comparators_require_source_schedule_instead_of_target_climatology():
+    transfer = evaluate.TRANSFER_SCHEDULE
+    table = predictions_for(
+        "KATL", [DAY_ONE], {MODEL: [10.0], PERSISTENCE: [12.0], transfer: [15.0]}
+    ).assign(split="validation", cohort_version="loao_KATL_v1")
+    check_baselines(table)
+    with pytest.raises(ValueError, match="baseline_transfer_schedule_v1"):
+        check_baselines(table[table.model_version.ne(transfer)])
+    records = records_of(table, labels_for(table, [11.0]))
+    assert value(records, metric=f"skill_vs_{transfer}", model=MODEL,
+                 airport="KATL", horizon=3) == pytest.approx(0.75)
+    assert not any(r["metric"] == f"skill_vs_{CLIMATOLOGY}" for r in records)
+
+
+def test_transfer_scope_requires_every_held_out_request_but_not_source_requests():
+    table = throughput_table().assign(split="validation", run="run")
+    source = predictions_for("KDFW", [DAY_ONE], {MODEL: [1.0]})
+    requests = pd.concat([requests_of(table), requests_of(source)], ignore_index=True)
+    scoped, scope = scoring_scope(
+        table, requests, {"run": ts(FIT_CUTOFF)}, scoring_airports=["KATL"]
+    )
+    assert len(scoped) == len(table) and scope[0]["rows_scored"] == 2
+    with pytest.raises(ValueError, match="has no"):
+        scoring_scope(table.iloc[1:], requests, {"run": ts(FIT_CUTOFF)},
+                      scoring_airports=["KATL"])
+    with pytest.raises(ValueError, match="outside scoring airports"):
+        scoring_scope(pd.concat([table, source.assign(split="validation", run="run")]),
+                      requests, {"run": ts(FIT_CUTOFF)}, scoring_airports=["KATL"])
+
+
+def test_transfer_schedule_must_declare_source_only_fit_airports():
+    table = predictions_for(
+        "KATL", [DAY_ONE], {PERSISTENCE: [12.0], evaluate.TRANSFER_SCHEDULE: [15.0]}
+    ).assign(run="run")
+    with pytest.raises(ValueError, match="trained on KATL"):
+        evaluate.check_experiment("leave_out_KATL", table,
+                                  {"run": {"train_airports": ["KATL", "KDFW"]}})
+    evaluate.check_experiment("leave_out_KATL", table,
+                              {"run": {"train_airports": ["KDFW"]}})
+
+
+def test_transfer_cohort_cannot_reuse_a_different_holdout_or_capacity_reference():
+    table = predictions_for("KATL", [DAY_ONE], {MODEL: [12.0]}).assign(
+        run="run", cohort_version="loao_KDFW_v1")
+    manifests = {"run": {"train_airports": ["KDFW"]}}
+    with pytest.raises(ValueError, match="mismatched LOAO"):
+        evaluate.check_experiment("leave_out_KATL", table, manifests)
+    with pytest.raises(ValueError, match="omits the capacity ratio"):
+        evaluate.check_experiment("leave_out_KATL",
+                                  table.assign(target_kind=CAPACITY_RATIO), manifests)
+
+
+def test_dev_cli_binds_the_actual_custom_request_file_hash(tmp_path, clean_git, monkeypatch):
+    table = throughput_table()
+    inputs = run_inputs(table, labels_for(table, [10.0, 20.0]), tmp_path)
+    custom = tmp_path / "cohort_requests.parquet"
+    requests_of(table).assign(source_scope="custom-cohort").to_parquet(custom)
+    assert sha256(custom) != sha256(inputs[1])
+    manifest_path = inputs[2] / "run" / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["prediction_requests_sha256"] = sha256(custom)
+    manifest_path.write_text(json.dumps(manifest))
+    monkeypatch.setattr(evaluate, "ARTIFACTS", inputs[2])
+    report_path = evaluate.cli(["--runs", "run", "--requests", str(custom),
+                                "--labels", str(inputs[0]), "--reports", str(inputs[3])])
+    report = json.loads(report_path.read_text())
+    assert report["data_sha256"][str(custom)] == manifest["prediction_requests_sha256"]
+    assert str(inputs[1]) not in report["data_sha256"]
+    # Identical request keys with different file bytes must not inherit the old binding.
+    requests_of(table).assign(source_scope="different-cohort-export").to_parquet(custom)
+    rejected_report = tmp_path / "must_not_exist"
+    with pytest.raises(ValueError, match="another prediction requests table"):
+        evaluate.cli(["--runs", "run", "--requests", str(custom),
+                      "--labels", str(inputs[0]), "--reports", str(rejected_report)])
+    assert not rejected_report.exists()
