@@ -14,3 +14,11 @@ cp .env.example .env
 On macOS, LightGBM also needs the OpenMP runtime: `brew install libomp`.
 
 Pipeline code is not written yet. See `docs/challenge5.md` for the brief.
+
+## Docs
+
+- `docs/challenge5.md`: brief and rubric.
+- `docs/PROJECT_SPEC.md`, `TEMPORAL_RULES.md`, `DATA_CONTRACTS.md`, `EVALUATION_PLAN.md`: target definitions, leakage rules, schemas, evaluation protocol.
+- `docs/DECISIONS.md`: open questions for organisers. `docs/SOURCES.md`: data sources and CSV audit.
+- `docs/ARCHITECTURE_AND_WORKPLAN.md`, `HANDOFF_TEMPLATE.md`, `prompts/`: optional three-agent workflow.
+- `configs/airports.yaml`: headings, timezones, weather stations. `configs/experiment.yaml`: proposed splits and targets (not frozen).

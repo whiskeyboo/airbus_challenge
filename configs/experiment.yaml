@@ -1,0 +1,50 @@
+schema_version: "0.1.0"
+experiment_id: "proposed-primary-v1"
+status: "proposed_not_frozen"
+seed: 42
+product_mode: "historical_replay"
+airports: ["KATL", "KDFW"]
+horizons_h: [3, 6, 9, 12]
+internal_timezone: "UTC"
+interval_convention: "half_open"
+targets:
+  airport_primary: "unresolved_official_aar"
+  airport_prototype: "reporting_carrier_touchdowns"
+  severe_delay: "departure_delay_gt45"
+  severe_delay_threshold_min: 45
+  severe_delay_comparison: "strict_greater_than"
+  severe_delay_population: "operated_with_valid_dep_delay"
+  cancellation: "cancellation"
+splits:
+  partition_by: "target_start_utc"
+  train: {start: "2023-01-01T00:00:00Z", end: "2024-01-01T00:00:00Z"}
+  validation: {start: "2024-01-01T00:00:00Z", end: "2024-07-01T00:00:00Z"}
+  calibration: {start: "2024-07-01T00:00:00Z", end: "2025-01-01T00:00:00Z"}
+  test: {start: "2025-01-01T00:00:00Z", end: "2026-01-01T00:00:00Z"}
+availability:
+  policy_status: "requires_source_audit"
+  schedule_knowledge_basis: "retrospective_assumption_not_verified_snapshot"
+  include_simulated_operations_features: false
+  metar_latency_minutes: null
+  taf_latency_minutes: null
+  operations_latency_minutes: null
+wind:
+  fixed_heading_mode: true
+  direct_comparison_to_true_north_weather: "provisional_pending_heading_clarification"
+uncertainty:
+  regression_quantiles: [0.10, 0.90]
+  bootstrap_unit: "airport_day_or_storm_episode_to_be_frozen"
+  proposed_bootstrap_replicates: 1000
+alerts:
+  status: "not_defined_or_validated"
+  probability_threshold: null
+  event_merge_gap_hours: null
+  false_alert_budget_per_airport_day: null
+release_gates:
+  supplemental_data_permission: "unconfirmed"
+  official_aar_source: "unresolved"
+  source_smoke_tests: "pending"
+  split_coverage_audit: "pending"
+  executable_schema_validation: "pending"
+# Null policies are unresolved, not zero. Production runs must reject unresolved
+# settings for the enabled feature/task. Fixture/scaffolding work may continue.
