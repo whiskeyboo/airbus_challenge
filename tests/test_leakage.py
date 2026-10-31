@@ -4,6 +4,8 @@ Test 4 (future flight statuses) is out of scope here: weather features read no f
 """
 
 import io
+import json
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -491,7 +493,9 @@ def tie_pair(observed, madis_rid, official_rid, official_first, **official):
         flags=("madis_hf", "duplicate_observed_time"),
         rid=madis_rid,
     )
-    off = metar(observed, flags=("duplicate_observed_time",), rid=official_rid, **official)
+    off = metar(
+        observed, flags=("duplicate_observed_time",), rid=official_rid, **official
+    )
     return [off, madis] if official_first else [madis, off]
 
 
@@ -501,7 +505,9 @@ def test_official_report_preferred_over_madis_on_observed_time_tie(
 ):
     obs = obs_table(
         *OBS[:2],
-        *tie_pair("2023-06-01 10:52", madis_rid, official_rid, official_first, wind=7.0),
+        *tie_pair(
+            "2023-06-01 10:52", madis_rid, official_rid, official_first, wind=7.0
+        ),
     )
     row, lineage = snap(
         obs, fc_table(ROUTINE), request("2023-06-01 12:00", "2023-06-01 18:00")
@@ -519,7 +525,9 @@ def test_pressure_tendency_window_start_prefers_official_on_tie(
     # Window at T=12:00 starts with the 08:52 pair; the official report reads 1012 hPa,
     # MADIS 1000 hPa. Latest is 10:52 at 1015 hPa, so the tendency must be +3, not +15.
     obs = obs_table(
-        *tie_pair("2023-06-01 08:52", madis_rid, official_rid, official_first, pressure=1012.0),
+        *tie_pair(
+            "2023-06-01 08:52", madis_rid, official_rid, official_first, pressure=1012.0
+        ),
         metar("2023-06-01 09:52", pressure=1013.0),
         metar("2023-06-01 10:52", pressure=1015.0),
     )
@@ -629,3 +637,158 @@ def test_calendar_uses_airport_local_time():
         12,
         3,
     )
+
+
+def request_rows(rows):
+    df = pd.DataFrame(
+        rows,
+        columns=[
+            "prediction_id",
+            "task",
+            "flight_id",
+            "as_of_utc",
+            "target_start_utc",
+            "target_end_utc",
+            "horizon_h",
+        ],
+    )
+    for c in ("as_of_utc", "target_start_utc", "target_end_utc"):
+        df[c] = pd.to_datetime(df[c], utc=True).astype("datetime64[us, UTC]")
+    return df.assign(
+        airport_icao="KATL",
+        horizon_h=df["horizon_h"].astype("int32"),
+        schedule_snapshot_id="s1",
+        cohort_version="v1",
+        data_mode="fixture",
+    )[features.REQUEST_COLUMNS]
+
+
+REQUESTS = request_rows(
+    [
+        (
+            "p1",
+            "throughput",
+            None,
+            "2023-06-01 12:00",
+            "2023-06-01 18:00",
+            "2023-06-01 19:00",
+            6,
+        ),
+        (
+            "p2",
+            "throughput",
+            None,
+            "2023-06-01 09:00",
+            "2023-06-01 18:00",
+            "2023-06-01 19:00",
+            9,
+        ),
+        # A flight on the hour shares the throughput snapshot key; null end means 1 h.
+        ("p3", "severe_delay", "f1", "2023-06-01 12:00", "2023-06-01 18:00", None, 6),
+        ("p4", "severe_delay", "f2", "2023-06-01 12:00", "2023-06-01 18:00", None, 6),
+        ("p5", "severe_delay", "f3", "2023-06-01 14:47", "2023-06-01 17:47", None, 3),
+    ]
+)
+
+
+def test_request_path_matches_airport_hour_path_and_dedupes_keys():
+    obs, fc = obs_table(*OBS), fc_table(ROUTINE, AMEND_1140)
+    grid = features.airport_hour_requests(
+        ["KATL"], ts("2023-06-01 17:00"), ts("2023-06-01 19:00"), [6, 9]
+    )
+    hourly, _ = features.snapshot(obs, fc, grid)
+    out, lineage = features.request_snapshots(obs, fc, REQUESTS)
+    feature_cols = [c for c in features.FEATURES if c != "airport_icao"]
+    feature_cols += ["status", "reason_codes", "feature_version"]
+    for pid, horizon in (("p1", 6), ("p2", 9), ("p3", 6)):
+        a = out.loc[out.prediction_id == pid, feature_cols].reset_index(drop=True)
+        b = hourly.loc[
+            (hourly.horizon_h == horizon)
+            & (hourly.target_start_utc == ts("2023-06-01 18:00")),
+            feature_cols,
+        ].reset_index(drop=True)
+        pd.testing.assert_frame_equal(a, b)
+    assert out.snapshot_key.nunique() == 3  # p1/p3/p4 share one key.
+    assert (
+        out.loc[out.prediction_id == "p5", "target_hour_local"].item() == 13
+    )  # 17:47Z = 13:47 EDT.
+    assert pd.isna(out.loc[out.prediction_id == "p3", "target_end_utc"].item())
+    p2 = out.loc[out.prediction_id == "p2"].iloc[0]
+    assert (
+        p2.status == "missing"
+    )  # Nothing was available at 09:00, so no lineage either.
+    assert p2.reason_codes == ["metar_unavailable", "taf_unavailable"]
+    assert set(lineage.snapshot_key) == set(out.snapshot_key) - {p2.snapshot_key}
+
+
+def write_fixture_dir(path, obs, fc, requests, decoy=b"not a parquet file"):
+    obs.to_parquet(path / "weather_observations.parquet")
+    fc.to_parquet(path / "weather_forecasts.parquet")
+    for name in ("weather_observations", "weather_forecasts"):
+        (path / f"{name}.manifest.json").write_text(
+            json.dumps({"sources": [{"sha256": name}]})
+        )
+    requests.to_parquet(path / "prediction_requests.parquet")
+    # Outcome tables: unreadable decoys, so any attempt to read them fails loudly.
+    for name in ("flights", "labels", "airport_hourly"):
+        (path / f"{name}.parquet").write_bytes(decoy)
+
+
+def test_request_build_reads_only_weather_and_requests(tmp_path, monkeypatch):
+    obs, fc = obs_table(*OBS), fc_table(ROUTINE, AMEND_1140)
+    write_fixture_dir(tmp_path, obs, fc, REQUESTS)
+    opened = []
+
+    def spy(fn):
+        def wrapper(path, *args, **kwargs):
+            opened.append(Path(path).name)
+            return fn(path, *args, **kwargs)
+
+        return wrapper
+
+    monkeypatch.setattr(pd, "read_parquet", spy(pd.read_parquet))
+    monkeypatch.setattr(features.ds, "dataset", spy(features.ds.dataset))
+    monkeypatch.setattr(features.pq, "read_table", spy(features.pq.read_table))
+    read_text = Path.read_text
+    monkeypatch.setattr(
+        Path,
+        "read_text",
+        lambda self, *a, **k: opened.append(self.name) or read_text(self, *a, **k),
+    )
+    summary = features.build_requests(tmp_path)
+    assert set(opened) <= {
+        "weather_observations.parquet",
+        "weather_forecasts.parquet",
+        "weather_observations.manifest.json",
+        "weather_forecasts.manifest.json",
+        "prediction_requests.parquet",
+    }
+    assert summary["unique_snapshot_keys"] == 3
+    snaps = pd.read_parquet(tmp_path / "feature_snapshots.parquet")
+    assert sorted(snaps.prediction_id) == ["p1", "p2", "p3", "p4", "p5"]
+    assert snaps.metar_wind_kt.dtype == "float32"
+    lineage = pd.read_parquet(tmp_path / "feature_lineage.parquet")
+    assert set(lineage.snapshot_key) < set(snaps.snapshot_key)
+
+    # Outcome-side data changes cannot change features: rebuild with different decoys.
+    first = (tmp_path / "feature_snapshots.parquet").read_bytes()
+    for name in ("flights", "labels", "airport_hourly"):
+        (tmp_path / f"{name}.parquet").write_bytes(b"different outcomes")
+    features.build_requests(tmp_path)
+    assert (tmp_path / "feature_snapshots.parquet").read_bytes() == first
+
+
+def test_request_columns_carry_no_outcomes():
+    outcome_words = (
+        "delay",
+        "cancel",
+        "divert",
+        "actual",
+        "wheels",
+        "y_true",
+        "label",
+        "arr",
+    )
+    assert not [
+        c for c in features.REQUEST_COLUMNS if any(w in c for w in outcome_words)
+    ]

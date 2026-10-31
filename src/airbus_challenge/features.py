@@ -1,11 +1,19 @@
+import collections
 import functools
 import hashlib
 import json
+import resource
+import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.compute as pc
+import pyarrow.dataset as ds
+import pyarrow.parquet as pq
 import yaml
 
 from airbus_challenge import iem
@@ -24,11 +32,38 @@ TAF_POLICY = "taf-select/1"
 # Ties on observed_at prefer the official report over MADIS high-frequency rows.
 METAR_POLICY = "metar-select/1"
 KEY = ["airport_icao", "as_of_utc", "target_start_utc", "horizon_h"]
+SNAPSHOT_KEY = ["airport_icao", "as_of_utc", "target_start_utc", "window_end_utc"]
+# Read from prediction_requests; it holds schedule fields only, never outcomes.
+REQUEST_COLUMNS = [
+    "prediction_id",
+    "task",
+    "airport_icao",
+    "flight_id",
+    "as_of_utc",
+    "target_start_utc",
+    "target_end_utc",
+    "horizon_h",
+    "schedule_snapshot_id",
+    "cohort_version",
+    "data_mode",
+]
 # Trailing windows (1/3/6 h) are on available_at_utc; nothing older than 6 h is read.
 METAR_WINDOW = pd.Timedelta(hours=6)
 METAR_MAX_AGE = pd.Timedelta(hours=3)  # Older latest report: METAR features are null.
 WX = {"ts": "TS", "fz": "FZ", "sn": "SN", "fg": "FG", "ra": "RA"}
 TAF_CHAIN = ["prevailing", "FM"]
+METAR_COLUMNS = [
+    "airport_icao", "observed_at_utc", "available_at_utc", "source_record_id", "raw_ref",
+    "wind_from_deg", "wind_kt", "gust_kt", "wind_status", "visibility_sm", "ceiling_ft",
+    "ceiling_status", "temp_c", "dewpoint_c", "pressure_hpa", "precip_1h_mm", "wx_codes",
+    "_official",
+]  # fmt: skip
+TAF_COLUMNS = [
+    "bulletin_id", "segment_id", "issued_at_utc", "available_at_utc", "forecast_type",
+    "valid_from_utc", "valid_to_utc", "wind_from_deg", "wind_kt", "gust_kt", "wind_status",
+    "visibility_sm", "ceiling_ft", "ceiling_status", "probability", "wx_codes", "raw_group",
+    "source_record_id", "airport_icao",
+]  # fmt: skip
 METAR_COMPONENTS = [
     "metar_headwind_kt_hdg",
     "metar_tailwind_kt_hdg",
@@ -318,7 +353,7 @@ def metar_features(
     """
     usable = obs["available_at_utc"].notna()
     obs = obs.assign(_official=~obs["quality_flags"].map(lambda f: "madis_hf" in f))
-    ex = expand_windows(obs[usable], keys)
+    ex = expand_windows(obs.loc[usable, METAR_COLUMNS], keys)
     ex = ex.sort_values(["key_row", "observed_at_utc", "_official", "source_record_id"])
     age = ex["as_of_utc"] - ex["available_at_utc"]
     g = ex.groupby("key_row")
@@ -485,7 +520,7 @@ def taf_features(
     )
     f["taf_is_amendment"] = s["is_amendment"].astype("boolean")
 
-    segs = fc.merge(
+    segs = fc[TAF_COLUMNS].merge(
         pd.DataFrame(
             {"row": r.index[covered], "bulletin_id": s.loc[covered, "bulletin_id"]}
         ),
@@ -679,13 +714,20 @@ def write(df: pd.DataFrame, path: Path) -> None:
     tmp.replace(path)
 
 
-def data_snapshot_id() -> str:
+def data_snapshot_id(processed: Path = iem.PROCESSED) -> str:
     manifests = [
-        json.loads((iem.PROCESSED / f"{n}.manifest.json").read_text())
+        json.loads((processed / f"{n}.manifest.json").read_text())
         for n in ("weather_observations", "weather_forecasts")
     ]
     parts = sorted(s["sha256"] for m in manifests for s in m["sources"])
     return hashlib.sha256("|".join(parts).encode()).hexdigest()[:16]
+
+
+def load_weather(processed: Path = iem.PROCESSED) -> tuple[pd.DataFrame, pd.DataFrame]:
+    return (
+        pd.read_parquet(processed / "weather_observations.parquet"),
+        pd.read_parquet(processed / "weather_forecasts.parquet"),
+    )
 
 
 def build() -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -693,8 +735,7 @@ def build() -> tuple[pd.DataFrame, pd.DataFrame]:
     start = datetime.fromisoformat(exp["splits"]["train"]["start"]).replace(tzinfo=UTC)
     end = datetime.fromisoformat(exp["splits"]["test"]["end"]).replace(tzinfo=UTC)
     req = airport_hour_requests(list(airports()), start, end, exp["horizons_h"])
-    obs = pd.read_parquet(iem.PROCESSED / "weather_observations.parquet")
-    fc = pd.read_parquet(iem.PROCESSED / "weather_forecasts.parquet")
+    obs, fc = load_weather()
     feats, lineage = snapshot(obs, fc, req)
     feats["data_snapshot_id"] = data_snapshot_id()
     feats = feats.sort_values(KEY).reset_index(drop=True)
@@ -703,11 +744,132 @@ def build() -> tuple[pd.DataFrame, pd.DataFrame]:
     return feats, lineage
 
 
+def snapshot_key(df: pd.DataFrame) -> pd.Series:
+    """sha256 of airport|as_of|target_start|window_end (RFC 3339 seconds), first 32 hex chars."""
+    iso = {c: df[c].dt.strftime("%Y-%m-%dT%H:%M:%SZ") for c in SNAPSHOT_KEY[1:]}
+    text = df[SNAPSHOT_KEY[0]].astype(str) + "|" + iso[SNAPSHOT_KEY[1]]
+    for c in SNAPSHOT_KEY[2:]:
+        text = text + "|" + iso[c]
+    return text.map(lambda t: hashlib.sha256(t.encode()).hexdigest()[:32]).astype(
+        "string"
+    )
+
+
+def request_snapshots(
+    obs: pd.DataFrame, fc: pd.DataFrame, req: pd.DataFrame
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Features per prediction request, computed once per unique snapshot key.
+
+    The snapshot key is (airport_icao, as_of_utc, target_start_utc, window_end_utc), where
+    window_end_utc = target_end_utc, or target_start_utc + 1 h when null (flight tasks).
+    Lineage is returned per snapshot_key; requests map to it through their snapshot_key column.
+    """
+    req = req.reset_index(drop=True)
+    window = req[["airport_icao", "as_of_utc", "target_start_utc"]].assign(
+        window_end_utc=req["target_end_utc"].fillna(
+            req["target_start_utc"] + pd.Timedelta(hours=1)
+        )
+    )
+    req = req.assign(
+        snapshot_key=snapshot_key(window), window_end_utc=window["window_end_utc"]
+    )
+    keys = req.drop_duplicates("snapshot_key")[[*SNAPSHOT_KEY, "snapshot_key"]]
+    feats, lineage = snapshot(
+        obs, fc, keys.rename(columns={"window_end_utc": "target_end_utc"})
+    )
+    feats = feats.drop(
+        columns=["airport_icao", "as_of_utc", "target_start_utc", "target_end_utc"]
+    )
+    out = req.merge(feats, on="snapshot_key", how="left", validate="many_to_one")
+    lineage = lineage.drop(
+        columns=["airport_icao", "as_of_utc", "target_start_utc", "target_end_utc"]
+    )
+    return out, lineage
+
+
+def compact(df: pd.DataFrame) -> pd.DataFrame:
+    floats = [c for c in df.columns if df[c].dtype == "float64"]
+    return df.astype(dict.fromkeys(floats, "float32"))
+
+
+def months_of(start: pd.Timestamp, end: pd.Timestamp) -> list[pd.Timestamp]:
+    return list(pd.date_range(start.floor("D").replace(day=1), end, freq="MS"))
+
+
+def build_requests(processed: Path = iem.PROCESSED) -> dict:
+    """feature_snapshots / feature_lineage for every prediction request, one month at a time.
+
+    Reads only the weather tables, their manifests and prediction_requests (request columns).
+    """
+    t0 = time.time()
+    obs, fc = load_weather(processed)
+    snapshot_id = data_snapshot_id(processed)
+    requests = ds.dataset(processed / "prediction_requests.parquet")
+    bounds = requests.to_table(columns=["target_start_utc"]).column(0)
+    lo, hi = pc.min_max(bounds).values()
+    start = pd.Timestamp(lo.as_py()).tz_convert("UTC")
+    stop = pd.Timestamp(hi.as_py()).tz_convert("UTC")
+    paths = {
+        n: processed / f"{n}.parquet" for n in ("feature_snapshots", "feature_lineage")
+    }
+    tmps = {n: p.with_name(f".{p.name}.tmp") for n, p in paths.items()}
+    writers, counts, keys, status = {}, collections.Counter(), 0, collections.Counter()
+    for m0 in months_of(start, stop):
+        m1 = m0 + pd.DateOffset(months=1)
+        field = ds.field("target_start_utc")
+        req = requests.to_table(
+            columns=REQUEST_COLUMNS,
+            filter=(field >= pa.scalar(m0, pa.timestamp("us", "UTC")))
+            & (field < pa.scalar(m1, pa.timestamp("us", "UTC"))),
+        ).to_pandas()
+        if req.empty:
+            continue
+        out, lineage = request_snapshots(obs, fc, req)
+        out["data_snapshot_id"] = snapshot_id
+        out = compact(out.sort_values(["task", "horizon_h", "prediction_id"]))
+        keys += out["snapshot_key"].nunique()
+        counts.update(out.groupby(["task", "horizon_h"]).size().to_dict())
+        status.update(out.groupby(["task", "status"]).size().to_dict())
+        for name, df in (("feature_snapshots", out), ("feature_lineage", lineage)):
+            table = pa.Table.from_pandas(df, preserve_index=False)
+            if name not in writers:
+                schema = table.schema
+                if "reason_codes" in schema.names:
+                    i = schema.get_field_index("reason_codes")
+                    schema = schema.set(
+                        i, pa.field("reason_codes", pa.list_(pa.string()))
+                    )
+                writers[name] = pq.ParquetWriter(tmps[name], schema)
+            writers[name].write_table(table.cast(writers[name].schema))
+    for name, w in writers.items():
+        w.close()
+        tmps[name].replace(paths[name])
+    summary = {
+        "feature_version": FEATURE_VERSION,
+        "data_snapshot_id": snapshot_id,
+        "rows_by_task_horizon": {
+            f"{t}|{h}": int(n) for (t, h), n in sorted(counts.items())
+        },
+        "unique_snapshot_keys": int(keys),
+        "status_by_task": {f"{t}|{s}": int(n) for (t, s), n in sorted(status.items())},
+        "lineage_key": "snapshot_key (join via feature_snapshots.snapshot_key)",
+        "runtime_s": round(time.time() - t0, 1),
+        "peak_rss_mb": round(peak_rss_mb(), 1),
+        "bytes": {n: p.stat().st_size for n, p in paths.items()},
+    }
+    manifest = processed / "feature_snapshots.manifest.json"
+    tmp = manifest.with_name(f".{manifest.name}.tmp")
+    tmp.write_text(json.dumps(summary, indent=2))
+    tmp.replace(manifest)
+    return summary
+
+
+def peak_rss_mb() -> float:
+    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return rss / 1e6 if sys.platform == "darwin" else rss / 1e3
+
+
 if __name__ == "__main__":
     feats, lineage = build()
-    print("features", feats.shape, "lineage", lineage.shape)
-    print(
-        feats.groupby(["airport_icao", "horizon_h"])
-        .status.value_counts()
-        .unstack(fill_value=0)
-    )
+    print("airport-hour features", feats.shape, "lineage", lineage.shape)
+    print(json.dumps(build_requests(), indent=2))
