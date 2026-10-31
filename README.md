@@ -13,9 +13,9 @@ On macOS, LightGBM also needs the OpenMP runtime: `brew install libomp`.
 
 ## Pipeline
 
-download → clean → requests → iem → targets → features → baselines + flight_baselines → train (teammate, in progress) → evaluate → failures (in progress) → recommend → explain → dashboard
+download → clean → requests → iem → targets → features → baselines + flight_baselines → train → evaluate → failures → recommend → explain → dashboard
 
-`train.py` is being built by a teammate and `failures.py` is in progress. `recommend.py` uses provisional thresholds until WP-D7.
+`recommend.py` uses provisional thresholds until WP-D7.
 
 Development run, in order. `iem` runs before `targets` because the P12 exclusion audit reads METARs.
 
