@@ -32,6 +32,7 @@ from airbus_challenge.evaluate import (
     _rmse_skill,
     availability_basis,
     baseline_support,
+    candidate_sha256,
     check_baselines,
     check_contract,
     check_label_keys,
@@ -45,7 +46,7 @@ from airbus_challenge.evaluate import (
     load_predictions,
     macro_records,
     main,
-    mark_common,
+    mark_scored,
     regression_metrics,
     reliability,
     required_baselines,
@@ -132,7 +133,7 @@ def requests_of(predictions: pd.DataFrame) -> pd.DataFrame:
 
 
 def scored(predictions: pd.DataFrame, labels: pd.DataFrame) -> pd.DataFrame:
-    return mark_common(join_labels(predictions, labels).assign(split="validation"))
+    return mark_scored(join_labels(predictions, labels).assign(split="validation"))
 
 
 def records_of(table: pd.DataFrame, labels: pd.DataFrame, basis=None) -> list[dict]:
@@ -915,15 +916,22 @@ def test_baselines_alone_need_no_model():
 # Scope
 
 
-def write_run(table: pd.DataFrame, root, run: str = "run", dirty: bool = False) -> None:
+FIT_CUTOFF = "2024-01-01T00:00:00+00:00"
+
+
+def write_run(
+    table: pd.DataFrame, root, run: str = "run", dirty: bool = False, **manifest
+) -> None:
     baselines.write_predictions(
-        table.drop(columns=["split", "day"], errors="ignore"),
+        table.drop(columns=["split", "day", "run"], errors="ignore"),
         root / run / "predictions.parquet",
     )
     manifest = {
         "run_id": run,
         "data_mode": table["data_mode"].iloc[0],
         "commit_dirty": dirty,
+        "fit_cutoff_utc": FIT_CUTOFF,
+        **manifest,
     }
     (root / run / "manifest.json").write_text(json.dumps(manifest))
 
@@ -957,13 +965,19 @@ def run_inputs(table: pd.DataFrame, labels: pd.DataFrame, tmp_path) -> list:
     labels_path = write_labels(labels, tmp_path)
     requests_path = tmp_path / "requests.parquet"
     requests_of(table).to_parquet(requests_path)
-    return [labels_path, requests_path, artifacts, tmp_path / "reports"]
+    return [
+        labels_path,
+        requests_path,
+        artifacts,
+        tmp_path / "reports",
+        tmp_path / "ledger",
+    ]
 
 
 def test_fixture_run_never_writes_the_reported_metrics(tmp_path, clean_git):
     table = throughput_table()
     inputs = run_inputs(table, labels_for(table, [10.0, 20.0]), tmp_path)
-    reports = inputs[-1]
+    reports = inputs[3]
     path = main(["run"], *inputs)
     assert path == reports / "fixture" / "metrics_dev.json"
     assert not (reports / "metrics.json").exists()
@@ -1014,7 +1028,7 @@ def test_main_runs_every_check_before_scoring(tmp_path, clean_git, change, messa
     requests.to_parquet(inputs[1])
     with pytest.raises(ValueError, match=message):
         main(["run"], *inputs)
-    assert not inputs[-1].exists()
+    assert not inputs[3].exists()
 
 
 def real_test_table() -> pd.DataFrame:
@@ -1038,9 +1052,8 @@ def locked_run(
 
 
 def assert_nothing_happened(inputs: list) -> None:
-    reports = inputs[-1]
-    assert not (reports / "metrics.json").exists()
-    assert not (reports / "locked_runs").exists()
+    assert not (inputs[3] / "metrics.json").exists()
+    assert not inputs[4].exists()
 
 
 def test_locked_run_claims_then_writes_once(tmp_path, clean_git):
@@ -1048,7 +1061,7 @@ def test_locked_run_claims_then_writes_once(tmp_path, clean_git):
     path = locked_run(inputs)
     assert path.name == "metrics.json"
     assert json.loads(path.read_text())["approved_by"] == "tester"
-    claim = json.loads((inputs[-1] / "locked_runs/evaluate_primary.json").read_text())
+    claim = json.loads((inputs[4] / "evaluate_primary.json").read_text())
     assert claim["approved_by"] == "tester"
     written = path.read_bytes()
     with pytest.raises(FileExistsError, match="runs once"):
@@ -1128,13 +1141,33 @@ def test_every_target_needs_a_candidate():
         check_locked_candidates(pd.concat([table, only_baselines], ignore_index=True))
 
 
+MANIFEST = {"fit_cutoff_utc": FIT_CUTOFF}
+
+
 @pytest.mark.parametrize(
     ("manifest", "message"),
     [
-        ({"run_id": "run", "data_mode": "fixture", "commit_dirty": False}, "real data"),
-        ({"run_id": "run", "data_mode": "real", "commit_dirty": True}, "uncommitted"),
-        ({"run_id": "run", "data_mode": "real", "commit_dirty": None}, "uncommitted"),
-        ({"run_id": "other", "data_mode": "real", "commit_dirty": False}, "belongs to"),
+        (
+            {
+                **MANIFEST,
+                "run_id": "run",
+                "data_mode": "fixture",
+                "commit_dirty": False,
+            },
+            "real data",
+        ),
+        (
+            {**MANIFEST, "run_id": "run", "data_mode": "real", "commit_dirty": True},
+            "uncommitted",
+        ),
+        (
+            {**MANIFEST, "run_id": "run", "data_mode": "real", "commit_dirty": None},
+            "uncommitted",
+        ),
+        (
+            {**MANIFEST, "run_id": "other", "data_mode": "real", "commit_dirty": False},
+            "belongs to",
+        ),
     ],
 )
 def test_locked_run_reads_each_run_manifest(tmp_path, clean_git, manifest, message):
@@ -1168,7 +1201,7 @@ def test_a_figure_failure_publishes_no_report(tmp_path, clean_git, monkeypatch):
     monkeypatch.setattr(evaluate, "rmse_figure", crash)
     with pytest.raises(RuntimeError, match="figure failed"):
         locked_run(inputs)
-    assert not (inputs[-1] / "metrics.json").exists()
+    assert not (inputs[3] / "metrics.json").exists()
 
 
 def test_dev_run_needs_no_approval_and_records_a_dirty_tree(tmp_path, monkeypatch):
@@ -1321,7 +1354,7 @@ def test_input_defects_never_spend_the_locked_run(tmp_path, clean_git, breakage)
 
 def test_labels_load_only_after_the_claim(tmp_path, clean_git, monkeypatch):
     inputs = locked_inputs(tmp_path)
-    claim = inputs[-1] / "locked_runs" / "evaluate_primary.json"
+    claim = inputs[4] / "evaluate_primary.json"
     load = evaluate.load_labels
     seen = []
 
@@ -1369,16 +1402,131 @@ def test_a_candidate_must_cover_every_cell():
         check_locked_candidates(table)
 
 
+def locked_as(inputs: list, experiment: str) -> object:
+    return main(
+        ["run"], *inputs, locked_test=True, approved_by="tester", experiment=experiment
+    )
+
+
 def test_each_declared_experiment_runs_once_and_writes_apart(tmp_path, clean_git):
     assert {"primary", "csv_only", "leave_out_KATL"} <= set(LOCKED_EXPERIMENTS)
-    inputs = locked_inputs(tmp_path)
-    run = {"locked_test": True, "approved_by": "tester"}
-    main(["run"], *inputs, **run)
-    path = main(["run"], *inputs, **run, experiment="csv_only")
+    inputs = locked_inputs(
+        tmp_path, real_test_table().assign(cohort_version="csv_only_v1")
+    )
+    path = locked_as(inputs, "csv_only")
     assert path.name == "metrics_csv_only.json"
     assert json.loads(path.read_text())["experiment"] == "csv_only"
     with pytest.raises(FileExistsError, match="runs once"):
-        main(["run"], *inputs, **run, experiment="csv_only")
+        locked_as(inputs, "csv_only")
+
+
+@pytest.mark.parametrize(
+    ("cohort", "experiment", "message"),
+    [
+        ("fixture-v0", "csv_only", "only CSV cohorts"),
+        ("csv_only_v1", "primary", "must not score CSV"),
+        ("csv_only_v1", "leave_out_KATL", "must not score CSV"),
+    ],
+)
+def test_a_locked_experiment_is_bound_to_its_cohort(
+    tmp_path, clean_git, cohort, experiment, message
+):
+    inputs = locked_inputs(tmp_path, real_test_table().assign(cohort_version=cohort))
+    with pytest.raises(ValueError, match=message):
+        locked_as(inputs, experiment)
+    assert_nothing_happened(inputs)
+
+
+def test_leave_one_airport_out_scores_only_the_held_out_airport(tmp_path, clean_git):
+    inputs = locked_inputs(tmp_path)
+    write_run(real_test_table(), inputs[2], train_airports=["KATL"])
+    with pytest.raises(ValueError, match="scores only KDFW"):
+        locked_as(inputs, "leave_out_KDFW")
+    assert_nothing_happened(inputs)
+
+
+@pytest.mark.parametrize(
+    ("manifest", "message"),
+    [
+        ({}, "needs train_airports"),
+        ({"train_airports": ["KATL", "KDFW"]}, "trained on"),
+    ],
+)
+def test_leave_one_airport_out_needs_a_model_trained_without_it(
+    tmp_path, clean_git, manifest, message
+):
+    inputs = locked_inputs(tmp_path)
+    write_run(real_test_table(), inputs[2], **manifest)
+    with pytest.raises(ValueError, match=message):
+        locked_as(inputs, "leave_out_KATL")
+    assert_nothing_happened(inputs)
+
+
+def test_the_same_forecasts_cannot_be_locked_again_under_new_names(tmp_path, clean_git):
+    inputs = locked_inputs(tmp_path)
+    write_run(real_test_table(), inputs[2], train_airports=["KDFW"])
+    locked_as(inputs, "leave_out_KATL")
+    table = real_test_table()
+    renamed = table.assign(
+        cohort_version="primary_v2",
+        prediction_id=table["prediction_id"] + "|v2",
+        model_version=table["model_version"].replace(MODEL, OTHER_MODEL),
+    )
+    (tmp_path / "second").mkdir()
+    second = locked_inputs(tmp_path / "second", renamed)
+    second[4] = inputs[4]
+    with pytest.raises(FileExistsError, match="claimed as evaluate_leave_out_KATL"):
+        locked_as(second, "primary")
+    assert not (second[3] / "metrics.json").exists()
+
+
+def test_the_candidate_hash_ignores_names_but_not_forecasts():
+    table = real_test_table()
+    renamed = table.assign(
+        cohort_version="other",
+        prediction_id=table["prediction_id"] + "|x",
+        model_version=table["model_version"].replace(MODEL, OTHER_MODEL),
+    )
+    assert candidate_sha256(renamed) == candidate_sha256(table)
+    changed = table.assign(estimate=table["estimate"] + 1)
+    assert candidate_sha256(changed) != candidate_sha256(table)
+
+
+def test_a_claim_refuses_predictions_already_claimed(tmp_path):
+    baselines.claim_locked_run("first", "tester", "abc", tmp_path, "hash-1")
+    with pytest.raises(FileExistsError, match="claimed as first"):
+        baselines.claim_locked_run("second", "tester", "abc", tmp_path, "hash-1")
+    baselines.claim_locked_run("third", "tester", "abc", tmp_path, "hash-2")
+    assert json.loads((tmp_path / "third.json").read_text())["predictions_sha256"] == (
+        "hash-2"
+    )
+
+
+def test_another_reports_folder_cannot_buy_a_second_locked_run(tmp_path, clean_git):
+    inputs = locked_inputs(tmp_path)
+    locked_run(inputs)
+    elsewhere = [*inputs[:3], tmp_path / "elsewhere", inputs[4]]
+    with pytest.raises(FileExistsError, match="runs once"):
+        locked_run(elsewhere)
+    assert not (tmp_path / "elsewhere").exists()
+
+
+@pytest.mark.parametrize("flag", ["--reports", "--requests"])
+def test_the_locked_cli_keeps_the_default_paths(monkeypatch, flag):
+    def never(*args, **kwargs):
+        raise AssertionError("main ran")
+
+    monkeypatch.setattr(evaluate, "main", never)
+    with pytest.raises(SystemExit):
+        evaluate.cli(["--locked-test", "--approved-by", "tester", flag, "elsewhere"])
+
+
+def test_the_dev_cli_passes_other_paths_through(monkeypatch, tmp_path):
+    seen = {}
+    monkeypatch.setattr(evaluate, "main", lambda runs, **kwargs: seen.update(kwargs))
+    evaluate.cli(["--reports", str(tmp_path), "--requests", str(tmp_path / "r")])
+    assert (seen["reports"], seen["requests_path"]) == (tmp_path, tmp_path / "r")
+    assert "ledger" not in seen
 
 
 def test_an_undeclared_experiment_is_refused(tmp_path, clean_git):
@@ -1563,3 +1711,96 @@ def test_models_and_baselines_share_one_scored_row_set():
     extra = extra.assign(prediction_id="issued-before-cutoff")
     with pytest.raises(ValueError, match="different rows"):
         check_same_rows(pd.concat([table, extra], ignore_index=True))
+
+
+# Re-review: fit cutoffs, common support and main-level checks
+
+
+def test_a_run_refitted_past_its_scored_rows_is_refused(tmp_path, clean_git):
+    # Refitted on train + validation, then scored in-sample on validation.
+    table = throughput_table()
+    inputs = run_inputs(table, labels_for(table, [10.0, 20.0]), tmp_path)
+    write_run(table, inputs[2], fit_cutoff_utc="2024-07-01T00:00:00+00:00")
+    with pytest.raises(ValueError, match="before the fit cutoff"):
+        main(["run"], *inputs)
+    assert not inputs[3].exists()
+
+
+@pytest.mark.parametrize(
+    ("cutoff", "message"),
+    [(None, "needs fit_cutoff_utc"), ("2024-01-01T00:00:00", "needs a timezone")],
+)
+def test_every_run_declares_a_fit_cutoff(tmp_path, clean_git, cutoff, message):
+    table = throughput_table()
+    inputs = run_inputs(table, labels_for(table, [10.0, 20.0]), tmp_path)
+    write_run(table, inputs[2], fit_cutoff_utc=cutoff)
+    with pytest.raises(ValueError, match=message):
+        main(["run"], *inputs)
+
+
+def test_main_refuses_a_candidate_scoring_rows_the_baselines_lack(tmp_path, clean_git):
+    # An earlier cutoff lets the candidate score a request issued before the
+    # scored scope, which the baselines skip, so skill would mix row sets.
+    table = throughput_table()
+    early = predictions_for("KATL", ["2024-01-01 02:00"], {MODEL: [5.0]})
+    everything = pd.concat([table, early], ignore_index=True)
+    is_model = table["model_version"].eq(MODEL)
+    inputs = run_inputs(
+        table[~is_model], labels_for(everything, [10.0, 20.0, 5.0]), tmp_path
+    )
+    requests_of(everything).to_parquet(inputs[1])
+    candidate = pd.concat([table[is_model], early], ignore_index=True)
+    write_run(candidate, inputs[2], "model", fit_cutoff_utc="2023-12-01T00:00:00+00:00")
+    with pytest.raises(ValueError, match="different rows"):
+        main(["run", "model"], *inputs)
+
+
+def test_main_refuses_a_requests_table_with_mixed_data_modes(tmp_path, clean_git):
+    table = throughput_table()
+    inputs = run_inputs(table, labels_for(table, [10.0, 20.0]), tmp_path)
+    # Out of scope, so only the data_mode check can see it.
+    stray = requests_of(predictions_for("KDFW", ["2023-06-01 15:00"], {MODEL: [1.0]}))
+    stray = stray.assign(prediction_id="real-request", data_mode="real")
+    pd.concat([requests_of(table), stray], ignore_index=True).to_parquet(inputs[1])
+    with pytest.raises(ValueError, match="mixed data_mode"):
+        main(["run"], *inputs)
+
+
+def test_all_horizon_common_support_compares_one_row_set():
+    table = predictions_for(
+        "KATL",
+        [DAY_ONE],
+        {MODEL: [12.0, np.nan], PERSISTENCE: [14.0, 14.0], CLIMATOLOGY: [10.0, 10.0]},
+        horizons=(3, 6),
+    )
+    records = records_of(table, labels_for(table, [10.0, 10.0]))
+    for airport in ["KATL", "pooled"]:
+        n = {
+            model: record(
+                records,
+                metric="rmse",
+                slice="common_support",
+                airport=airport,
+                horizon="all",
+                model=model,
+            )["n_predicted"]
+            for model in [MODEL, PERSISTENCE, CLIMATOLOGY]
+        }
+        assert n == {MODEL: 1, PERSISTENCE: 1, CLIMATOLOGY: 1}
+
+
+def test_pooled_reliability_compares_one_row_set():
+    table = predictions_for(
+        "KATL",
+        [DAY_ONE],
+        {MODEL: [0.2, np.nan], CONDITIONAL_RATE: [0.5, 0.5], LOGISTIC: [0.4, 0.4]},
+        horizons=(3, 6),
+        target_kind=SEVERE,
+        unit=PROBABILITY,
+    )
+    bins = reliability(scored(table, labels_for(table, [0.0, 1.0], PROBABILITY)))
+    n = {}
+    for b in bins:
+        n[b["model"], b["airport"]] = n.get((b["model"], b["airport"]), 0) + b["n"]
+    assert set(n.values()) == {1}
+    assert {model for model, _ in n} == {MODEL, CONDITIONAL_RATE, LOGISTIC}

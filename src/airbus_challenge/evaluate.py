@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 from datetime import UTC, datetime
 from itertools import cycle, product
@@ -18,6 +19,7 @@ from airbus_challenge.baselines import (
     ARTIFACTS,
     DATA_MODES,
     EXPERIMENT,
+    LOCKED_LEDGER,
     PREDICTION_SCHEMA,
     REQUESTS,
     RETROSPECTIVE_SCHEDULE,
@@ -69,6 +71,8 @@ REQUEST_KEYS = [
 LABEL_KEYS = ["prediction_id", "target_kind", "unit", "label_version"]
 # Each has one locked run. Anything else on the test split is exploratory.
 LOCKED_EXPERIMENTS = ["primary", "csv_only", *(f"leave_out_{i}" for i in AIRPORTS)]
+# Agent 1 names the provided-CSV cohorts with this prefix (DATA_CONTRACTS §6).
+CSV_COHORT_PREFIX = "csv_only"
 METRIC_DEFINITIONS = {
     "average_precision": "sklearn.metrics.average_precision_score, step-wise",
     "recall_at_precision": (
@@ -80,7 +84,8 @@ METRIC_DEFINITIONS = {
     "each target counts once per horizon",
     "macro": "unweighted mean over every configured airport, null unless all are "
     "defined",
-    "common_support": "rows where every model active in the cell gave an estimate",
+    "common_support": "rows where every model active in the slice gave an estimate, "
+    "decided over the whole slice, so pooled and all-horizon rows share one row set",
     "baseline_support": "rows the model and both required baselines all scored; "
     "skill is measured only here",
     "operational_day": "24 h from 08:00 UTC, near the overnight traffic trough",
@@ -144,14 +149,15 @@ def load_predictions(
     locked_test: bool,
     cohorts: list[str] | None = None,
 ) -> pd.DataFrame:
-    predictions = pd.concat(
-        [pd.read_parquet(artifacts / r / "predictions.parquet") for r in runs],
-        ignore_index=True,
-    )
-    # A stray y_true or eligible column would otherwise override the labels.
-    extra = set(predictions) - set(PREDICTION_SCHEMA.names)
-    if extra:
-        raise ValueError(f"predictions must not carry {sorted(extra)}")
+    frames = []
+    for run in runs:
+        frame = pd.read_parquet(artifacts / run / "predictions.parquet")
+        # A stray y_true or eligible column would otherwise override the labels.
+        extra = set(frame) - set(PREDICTION_SCHEMA.names)
+        if extra:
+            raise ValueError(f"predictions must not carry {sorted(extra)}")
+        frames.append(frame.assign(run=run))
+    predictions = pd.concat(frames, ignore_index=True)
     if cohorts:
         predictions = predictions[predictions["cohort_version"].isin(cohorts)]
         if predictions.empty:
@@ -189,8 +195,9 @@ def check_requests(predictions: pd.DataFrame, requests: pd.DataFrame) -> None:
     stray = matched[matched["_merge"].ne("both")]
     if len(stray):
         raise ValueError(f"no matching request for {stray['prediction_id'].iloc[0]}")
-    fit_cutoff = split_bounds("train")[1]
-    expected = requests[requests["as_of_utc"].ge(fit_cutoff)]
+    # In scope from the end of train (contract §6); each run's own cutoff is
+    # checked in check_fit_cutoffs.
+    expected = requests[requests["as_of_utc"].ge(split_bounds("train")[1])]
     expected = expected.assign(split=split_of(expected["target_start_utc"]))
     keys = ["split", "task", "cohort_version", "target_kind", "model_version"]
     for (split, task, cohort, target, model), frame in predictions.groupby(keys):
@@ -209,7 +216,7 @@ def check_requests(predictions: pd.DataFrame, requests: pd.DataFrame) -> None:
 
 
 def check_same_rows(predictions: pd.DataFrame) -> None:
-    # Models and baselines must share one fit cutoff and one scored row set.
+    # Skill is only comparable when models and baselines score the same requests.
     keys = ["split", "task", "cohort_version", "target_kind"]
     for scope, frame in predictions.groupby(keys):
         rows = frame.groupby("model_version")["prediction_id"].agg(set)
@@ -250,15 +257,84 @@ def check_locked_candidates(predictions: pd.DataFrame) -> None:
         raise ValueError(f"no usable estimate in {empty[CELL].iloc[0].to_dict()}")
 
 
-def check_run_manifests(artifacts: Path, runs: list[str]) -> None:
+def read_manifests(artifacts: Path, runs: list[str]) -> dict[str, dict]:
+    manifests = {}
     for run in runs:
         manifest = json.loads((artifacts / run / "manifest.json").read_text())
         if manifest["run_id"] != run:
             raise ValueError(f"{run}: manifest belongs to {manifest['run_id']}")
+        manifests[run] = manifest
+    return manifests
+
+
+def check_fit_cutoffs(predictions: pd.DataFrame, manifests: dict[str, dict]) -> None:
+    for run, manifest in manifests.items():
+        if manifest.get("fit_cutoff_utc") is None:
+            raise ValueError(f"{run}: manifest needs fit_cutoff_utc")
+        cutoff = pd.Timestamp(manifest["fit_cutoff_utc"])
+        if cutoff.tzinfo is None:
+            raise ValueError(f"{run}: fit_cutoff_utc needs a timezone")
+        rows = predictions[predictions["run"].eq(run)]
+        early = rows[rows["as_of_utc"].lt(cutoff)]
+        if len(early):
+            raise ValueError(
+                f"{run}: {early['prediction_id'].iloc[0]} is issued before the fit "
+                f"cutoff {cutoff}, so the fit saw outcomes after its issue time"
+            )
+
+
+def check_run_manifests(manifests: dict[str, dict]) -> None:
+    for run, manifest in manifests.items():
         if manifest["data_mode"] != "real":
             raise ValueError(f"{run}: locked test needs real data")
         if manifest["commit_dirty"] is not False:
             raise ValueError(f"{run}: built from uncommitted code")
+
+
+def check_experiment(
+    experiment: str, predictions: pd.DataFrame, manifests: dict[str, dict]
+) -> None:
+    # A locked experiment is bound to its content, so one run can't be relabelled.
+    cohorts = set(predictions["cohort_version"])
+    csv = {c for c in cohorts if c.startswith(CSV_COHORT_PREFIX)}
+    if experiment == "csv_only" and csv != cohorts:
+        raise ValueError(
+            f"csv_only scores only CSV cohorts, got {sorted(cohorts - csv)}"
+        )
+    if experiment != "csv_only" and csv:
+        raise ValueError(f"{experiment} must not score CSV cohorts {sorted(csv)}")
+    if not experiment.startswith("leave_out_"):
+        return
+    held_out = experiment.removeprefix("leave_out_")
+    airports = set(predictions["airport_icao"])
+    if airports != {held_out}:
+        raise ValueError(f"{experiment} scores only {held_out}, got {sorted(airports)}")
+    candidates = predictions.loc[~is_baseline(predictions["model_version"]), "run"]
+    for run in candidates.unique():
+        train = manifests[run].get("train_airports")
+        if train is None:
+            raise ValueError(f"{run}: manifest needs train_airports for {experiment}")
+        if held_out in train:
+            raise ValueError(f"{run} was trained on {held_out}")
+
+
+def candidate_sha256(predictions: pd.DataFrame) -> str:
+    # Cohort, id and model name are left out: renaming them keeps the forecasts.
+    columns = [
+        "task",
+        "airport_icao",
+        "flight_id",
+        "target_start_utc",
+        "horizon_h",
+        "target_kind",
+        "estimate",
+        "p10",
+        "p90",
+    ]
+    rows = predictions.loc[~is_baseline(predictions["model_version"]), columns]
+    rows = rows.sort_values(columns).reset_index(drop=True)
+    hashed = pd.util.hash_pandas_object(rows, index=False).to_numpy()
+    return hashlib.sha256(hashed.tobytes()).hexdigest()
 
 
 def labels_data_mode(path: Path) -> str:
@@ -325,15 +401,15 @@ def join_labels(predictions: pd.DataFrame, labels: pd.DataFrame) -> pd.DataFrame
     )
 
 
-def mark_common(joined: pd.DataFrame) -> pd.DataFrame:
-    scored = joined["eligible"] & joined["estimate"].notna()
-    rows = joined[scored]
-    n_active = rows.groupby(CELL)["model_version"].transform("nunique")
-    n_models = rows.groupby(["prediction_id", "target_kind"])["model_version"]
-    common = n_models.transform("nunique").eq(n_active)
-    return joined.assign(
-        scored=scored, common=common.reindex(joined.index, fill_value=False)
-    )
+def mark_scored(joined: pd.DataFrame) -> pd.DataFrame:
+    return joined.assign(scored=joined["eligible"] & joined["estimate"].notna())
+
+
+def common_rows(scored: pd.DataFrame) -> pd.DataFrame:
+    # Decided over the whole slice, so a pooled row never unions per-cell supports.
+    n_active = scored["model_version"].nunique()
+    n_models = scored.groupby(["prediction_id", "target_kind"])["model_version"]
+    return scored[n_models.transform("nunique").eq(n_active)]
 
 
 def _mean(n: np.ndarray, total: np.ndarray) -> np.ndarray:
@@ -582,8 +658,8 @@ def evaluate_target(frame: pd.DataFrame, basis: dict[str, list[str]]) -> list[di
             cell = cell[cell["horizon_h"].eq(horizon)]
         if cell.empty:
             continue
-        common = cell[cell["common"]]
         scored = cell[cell["scored"]]
+        common = common_rows(scored)
         squared = squared_errors(scored)
         days = scored.drop_duplicates("prediction_id").set_index("prediction_id")["day"]
         place = {
@@ -663,34 +739,34 @@ def macro_records(records: list[dict]) -> list[dict]:
 
 
 def reliability(joined: pd.DataFrame) -> list[dict]:
-    rows = joined[joined["target_kind"].isin(BINARY) & joined["common"]]
+    rows = joined[joined["target_kind"].isin(BINARY) & joined["scored"]]
     bins = []
-    keys = [*SCOPE, "model_version"]
-    for (split, cohort, target, model), group in rows.groupby(keys):
+    cuts = np.linspace(0, 1, RELIABILITY_BINS + 1)[1:-1]
+    for (split, cohort, target), group in rows.groupby(SCOPE):
         for airport in [*sorted(group["airport_icao"].unique()), POOLED]:
             cell = group
             if airport != POOLED:
                 cell = group[group["airport_icao"].eq(airport)]
-            cuts = np.linspace(0, 1, RELIABILITY_BINS + 1)[1:-1]
-            # Tied probabilities stay in one bin.
-            edges = np.unique(np.quantile(cell["estimate"], cuts))
-            index = np.searchsorted(edges, cell["estimate"], side="left")
-            table = cell.groupby(index).agg(
-                mean_predicted=("estimate", "mean"),
-                observed_rate=("y_true", "mean"),
-                n=("y_true", "size"),
-            )
-            bins += [
-                {
-                    "split": split,
-                    "cohort": cohort,
-                    "target": target,
-                    "model": model,
-                    "airport": airport,
-                    **row,
-                }
-                for row in table.to_dict("records")
-            ]
+            for model, frame in common_rows(cell).groupby("model_version"):
+                # Tied probabilities stay in one bin.
+                edges = np.unique(np.quantile(frame["estimate"], cuts))
+                index = np.searchsorted(edges, frame["estimate"], side="left")
+                table = frame.groupby(index).agg(
+                    mean_predicted=("estimate", "mean"),
+                    observed_rate=("y_true", "mean"),
+                    n=("y_true", "size"),
+                )
+                bins += [
+                    {
+                        "split": split,
+                        "cohort": cohort,
+                        "target": target,
+                        "model": model,
+                        "airport": airport,
+                        **row,
+                    }
+                    for row in table.to_dict("records")
+                ]
     return bins
 
 
@@ -914,6 +990,7 @@ def main(
     requests_path: Path = REQUESTS,
     artifacts: Path = ARTIFACTS,
     reports: Path = REPORTS,
+    ledger: Path = LOCKED_LEDGER,
     locked_test: bool = False,
     approved_by: str | None = None,
     experiment: str = "primary",
@@ -925,6 +1002,8 @@ def main(
     sources = [artifacts / r / "predictions.parquet" for r in runs]
     data_sha256 = {str(p): sha256(p) for p in [*sources, labels_path, requests_path]}
     predictions = load_predictions(artifacts, runs, locked_test, cohorts)
+    manifests = read_manifests(artifacts, runs)
+    check_fit_cutoffs(predictions, manifests)
     check_contract(predictions)
     requests = pd.read_parquet(requests_path, columns=REQUEST_KEYS)
     if cohorts:
@@ -943,7 +1022,6 @@ def main(
     data_mode = modes.pop()
     if data_mode not in DATA_MODES:
         raise ValueError(f"data_mode {data_mode} outside {DATA_MODES}")
-    ledger = reports / "locked_runs"
     if data_mode == "fixture":
         reports = reports / "fixture"
     suffix = "" if experiment == "primary" else f"_{experiment}"
@@ -962,11 +1040,14 @@ def main(
         if predictions["data_snapshot_id"].nunique() != 1:
             raise ValueError("locked test needs one data snapshot across runs")
         check_locked_candidates(predictions)
-        check_run_manifests(artifacts, runs)
-        claim_locked_run(run_id, approved_by, commit, ledger)
+        check_run_manifests(manifests)
+        check_experiment(experiment, predictions, manifests)
+        claim_locked_run(
+            run_id, approved_by, commit, ledger, candidate_sha256(predictions)
+        )
     ids = predictions["prediction_id"].unique().tolist()
     labels = load_labels(labels_path, ids)
-    joined = mark_common(join_labels(predictions, labels))
+    joined = mark_scored(join_labels(predictions, labels))
     basis = availability_basis(predictions)
     records = []
     for _, frame in joined.groupby(SCOPE):
@@ -1015,23 +1096,30 @@ def main(
     return path
 
 
-if __name__ == "__main__":
+def cli(argv: list[str] | None = None) -> Path:
     parser = argparse.ArgumentParser()
     parser.add_argument("--locked-test", action="store_true")
     parser.add_argument("--approved-by")
     parser.add_argument("--runs", nargs="+")
     parser.add_argument("--experiment", default="primary", choices=LOCKED_EXPERIMENTS)
     parser.add_argument("--cohorts", nargs="+")
-    parser.add_argument("--requests", type=Path, default=REQUESTS)
-    parser.add_argument("--reports", type=Path, default=REPORTS)
-    args = parser.parse_args()
+    parser.add_argument("--requests", type=Path)
+    parser.add_argument("--reports", type=Path)
+    args = parser.parse_args(argv)
+    # Locked runs read and write only the paths the ledger and manifests vouch for.
+    if args.locked_test and (args.reports or args.requests):
+        parser.error("--locked-test uses the default --reports and --requests")
     default = "baselines_locked_test" if args.locked_test else "baselines_dev"
-    main(
+    return main(
         args.runs or [default],
-        requests_path=args.requests,
-        reports=args.reports,
+        requests_path=args.requests or REQUESTS,
+        reports=args.reports or REPORTS,
         locked_test=args.locked_test,
         approved_by=args.approved_by,
         experiment=args.experiment,
         cohorts=args.cohorts,
     )
+
+
+if __name__ == "__main__":
+    cli()

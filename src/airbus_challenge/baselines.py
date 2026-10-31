@@ -365,13 +365,27 @@ def source_dirty() -> bool:
 
 
 def claim_locked_run(
-    name: str, approved_by: str, commit: str, ledger: Path = LOCKED_LEDGER
+    name: str,
+    approved_by: str,
+    commit: str,
+    ledger: Path = LOCKED_LEDGER,
+    predictions_sha256: str | None = None,
 ) -> None:
     ledger.mkdir(parents=True, exist_ok=True)
+    if predictions_sha256:
+        for path in sorted(ledger.glob("*.json")):
+            if json.loads(path.read_text()).get("predictions_sha256") == (
+                predictions_sha256
+            ):
+                raise FileExistsError(
+                    f"these predictions were claimed as {path.stem}; "
+                    "the locked test runs once"
+                )
     claim = {
         "run": name,
         "approved_by": approved_by,
         "commit": commit,
+        "predictions_sha256": predictions_sha256,
         "claimed_at_utc": datetime.now(UTC).isoformat(),
     }
     try:

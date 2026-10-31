@@ -70,6 +70,8 @@ Estimate metric uncertainty by resampling days or storm episodes to respect corr
 
 Before final scoring, record dataset hashes and source scope, split/cohort definitions, exclusion policies, label versions, feature registry, latency assumptions, model/hyperparameters, calibration artifacts, alert policy, random seeds, code commit, environment, and all metric definitions.
 
+Each locked experiment runs once and is bound to its content: `csv_only` scores only CSV cohorts, `leave_out_X` scores only airport X with a model whose `train_airports` exclude X, and the claim stores a hash of the candidate forecasts, so the same forecasts can't be claimed again under another experiment, cohort or model name. Claims always go to the git-tracked `reports/locked_runs/`, and a locked run refuses `--reports` and `--requests`.
+
 The evaluator loads saved predictions and labels independently. Never let the UI recompute metrics. Save prediction-level errors for analysis, but do not feed final-test failure cases back into the locked candidate.
 
 ## 7. Failure report and presentation

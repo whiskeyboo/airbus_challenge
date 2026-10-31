@@ -120,7 +120,7 @@ Required columns:
 
 `task` is one of `throughput`, `severe_delay`.
 
-A request is in scope for a split, task and `cohort_version` when its target falls in that split and `as_of_utc` is at or after the training fit cutoff. Results are never pooled across cohorts. The CSV-only comparison and each leave-one-airport-out test use their own `cohort_version`.
+A request is in scope for a split, task and `cohort_version` when its target falls in that split and `as_of_utc` is at or after the training fit cutoff. Results are never pooled across cohorts. The CSV-only comparison and each leave-one-airport-out test use their own `cohort_version`; CSV-only versions start with `csv_only`.
 
 For flights, `target_start_utc` is the scheduled departure instant and `target_end_utc` is null. For airport tasks, it is the target hour and end is start + 1 hour. `horizon_h` must equal the target-start/as-of difference in hours.
 
@@ -174,7 +174,7 @@ Fields: request keys, `target_kind`, `estimate` (nullable float64), `p10`, `p90`
 - Regression estimate is the declared point estimator; classification estimate is a probability in [0,1].
 - `p10/p90` are regression predictive quantiles, not classification confidence intervals. Enforce p10 <= p90; fix crossing with a documented method. A mean estimate need not mathematically lie between those quantiles.
 - A model writes a row for every request in scope. A request it cannot score is `unavailable`, never omitted.
-- `artifacts/<run_id>/manifest.json` records at least `run_id`, `data_mode` and `commit_dirty`.
+- `artifacts/<run_id>/manifest.json` records at least `run_id`, `data_mode`, `commit_dirty` and a timezone-aware `fit_cutoff_utc`. The evaluator refuses a run that scores a request issued before its cutoff. A model for a leave-one-airport-out test also records `train_airports`.
 - Unavailable means null estimate and a nonempty reason list. Degraded means an actually validated fallback or model capability, not a random imputation.
 - Baselines use the same schema with their own model IDs.
 - Explanations use a companion table: prediction/model key, feature, feature value, contribution, contribution scale, explanation method. Probabilistic log-odds contributions are labelled as such.
