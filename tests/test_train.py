@@ -88,3 +88,31 @@ def test_run_manifest_and_predictions_follow_the_contract():
     assert (preds.as_of_utc >= train.cutoff()).all()
     assert (preds.p10 <= preds.p90).all()
     assert preds.prediction_id.is_unique
+
+
+def test_delay_scope_excludes_test_and_fit_reads_only_requested_train_labels(tmp_path):
+    req = pd.DataFrame(
+        {
+            "prediction_id": ["val", "test"],
+            "target_start_utc": ts("2024-03-01 12:47", "2025-03-01 12:47"),
+            "as_of_utc": ts("2024-03-01 09:47", "2025-03-01 09:47"),
+        }
+    )
+    assert list(train.in_scope(req).prediction_id) == ["val"]
+    path = tmp_path / "labels.parquet"
+    labels = pd.DataFrame(
+        {
+            "prediction_id": ["tr1", "tr2", "cancelled", "test1"],
+            "target_kind": train.DELAY["target"],
+            "y_true": [1.0, 0.0, np.nan, 1.0],
+            "eligible": [True, True, False, True],
+        }
+    )
+    labels.to_parquet(path)
+    got = train.training_labels(
+        path, ["tr1", "tr2", "cancelled"], train.DELAY["target"]
+    )
+    assert list(got.prediction_id) == [
+        "tr1",
+        "tr2",
+    ]  # Cancelled excluded; test never read.
