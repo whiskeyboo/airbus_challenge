@@ -20,5 +20,5 @@ splits:
   test:        {start: "2025-01-01", end: "2025-08-01"}
 leave_one_airport_out: true
 
-# Open items: see docs/DECISIONS.md (O02 supplemental data permission, O03 heading reference).
-supplemental_data_permission: unconfirmed
+# Resolved from the brief: see docs/DECISIONS.md (O01-O04).
+supplemental_data_permission: in_scope_per_brief

@@ -27,14 +27,21 @@ This is the authoritative register for decisions that change scientific meaning 
 | P07 | Forecast updates hourly; flight lead times anchored to scheduled departure | Lead | Record cohort/version policy |
 | P08 | Supplemental data work starts with source documentation and small access tests | Lead/A | Confirm competition permission before incorporating into scored results |
 
+## Resolved from the brief (team decisions, 2026-10-31)
+
+Basis: `Autonomous SG 2026_Airbus Track.pdf`, Challenge 5, pages 5-6. These are readings of the brief, not organiser answers; revisit if the organisers say otherwise.
+
+| ID | Question | Decision | Evidence in brief |
+| --- | --- | --- | --- |
+| O02 | Supplemental public data permitted? | **Yes.** BTS, IEM METAR/TAF and NOAA storm data are in scope. CSV-only results are still reported as a separate ablation. | "ingests publicly available weather observations (METARs/TAFs and NOAA storm logs)"; "Scripts that download and process public datasets automatically" |
+| O01 | Official hourly AAR available? | **No.** Nothing is supplied, so the target is the BTS arrival-throughput proxy (P05), scored by RMSE as the brief asks. Labelled "arrival throughput (AAR proxy)". | "Accurate prediction of Arrival Acceptance Rates, measured by Root Mean Squared Error"; provided data has no AAR |
+| O04 | Live inference required? | **No.** Historical replay with an issue-time slider in the dashboard. Live is optional stretch only. | "Dashboard that displays risk scores alongside historical trends" |
+| O03 | Headings true or magnetic? | **Unspecified; use as given** and compare directly with METAR wind (true north). Documented as an assumption; error is a few degrees. | "All flights take-off and land at heading degree 80 / 180" |
+
 ## Open items
 
 | ID | Question | Why it matters | Safe work meanwhile |
 | --- | --- | --- | --- |
-| O01 | Can organisers supply official hourly AAR? Which label/aggregation do they expect? | Defines the primary regression task | Build target adapters and throughput prototype |
-| O02 | Are supplemental flight/weather datasets permitted? | Determines scored-data scope | Audit provided data, prepare adapters and fixtures |
-| O03 | Are the supplied headings intended as true or magnetic? | Wind-component reference consistency | Preserve values and explicitly mark direct-comparison assumption |
-| O04 | Is live inference required or is historical replay sufficient? | Live schedules/status need separate sources | Build reproducible replay |
 | O05 | Which repository, agent tools, runtime and hosting environment will be used? | Determines setup and deployment | Prepare portable interfaces; no external deployment |
 | O06 | What historical schedule/status knowledge can be evidenced? | Prevents availability overclaims | Declare retrospective simulation and exclude unsupported features |
 | O07 | Is sufficient AAR/TAF/flight coverage available for proposed partitions? | Determines defensible evaluation window | Coverage audit only; do not choose periods based on test skill |
