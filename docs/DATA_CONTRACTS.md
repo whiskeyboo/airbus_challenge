@@ -107,6 +107,7 @@ Key: `(airport_icao, hour_start_utc, source_snapshot_id)`.
 | `coverage_status` | `complete_for_source_scope`, `partial`, `missing` |
 | `coverage_fraction` | float64 nullable; define numerator/denominator if supplied |
 | `schedule_knowledge_basis` | string |
+| `data_mode` | `real` or `fixture`, required; one value per table |
 
 Generate a complete UTC hour grid, not just hours with records. Use zero only when the source partition is complete for the declared reporting scope and no qualifying movement occurred. This does not imply coverage of every aircraft category. A 25-hour local day still has unique UTC hours.
 
