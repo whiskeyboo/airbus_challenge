@@ -509,8 +509,9 @@ def test_label_45_46_cancelled_and_other_timestamp_quarantine():
     assert pd.isna(severe.y_true.iloc[2])
     assert severe.exclusion_reason.iloc[2] == "cancelled"
     assert labels[labels.target_kind.eq("cancellation")].y_true.tolist() == [0, 0, 1]
-    assert labels.outcome_available_at_utc.isna().all()
-    assert labels.availability_basis.eq("unknown").all()
+    assert labels.loc[labels.eligible, "outcome_available_at_utc"].notna().all()
+    assert labels.loc[~labels.eligible, "outcome_available_at_utc"].isna().all()
+    assert labels.availability_basis.eq("simulated").all()
 
 
 @pytest.mark.parametrize("all_cohorts", [False, True])
@@ -584,6 +585,37 @@ def test_requests_and_targets_end_to_end_fixture(tmp_path, monkeypatch, all_coho
     assert len(labels) == (428 if all_cohorts else 204)
     import pyarrow.parquet as pq
 
+    feed = targets.build_operational_feed(targets.HOURLY, tmp_path / "feed", 10)
+    feed_path = tmp_path / "feed/operational_feed.parquet"
+    feed_manifest = json.loads(feed_path.with_suffix(".manifest.json").read_text())
+    assert len(feed) == len(hourly)
+    assert feed_manifest["source_hourly_sha256"] == sha256(targets.HOURLY)
+    assert feed_manifest["parquet_sha256"] == sha256(feed_path)
+    assert feed_manifest["availability_basis"] == "simulated"
+    assert feed_manifest["data_mode"] == "fixture"
+    assert not {"scheduled_arrivals", "throughput_over_clear_weather_p95"} & set(
+        feed.columns
+    )
+    training_path = targets.build_training_labels(
+        requests.OUTPUT, targets.LABELS, output_dir=tmp_path / "training"
+    )
+    training = pd.read_parquet(training_path)
+    training_manifest = json.loads(
+        training_path.with_suffix(".manifest.json").read_text()
+    )
+    assert training.outcome_available_at_utc.le(training.fit_cutoff_utc).all()
+    assert training.eligible.all()
+    assert not training.target_start_utc.ge(pd.Timestamp("2023-01-16T00:00Z")).any()
+    assert training_manifest["source_labels_sha256"] == sha256(targets.LABELS)
+    assert training_manifest["rows"] == len(training)
+    assert training_manifest["data_mode"] == "fixture"
+    with pytest.raises(ValueError, match="Capacity reference was fitted after"):
+        targets.build_training_labels(
+            requests.OUTPUT,
+            targets.LABELS,
+            fit_cutoff="2023-01-15T18:00Z",
+            output_dir=tmp_path / "early-training",
+        )
     assert set(hourly.data_mode) == {"fixture"}
     assert set(labels.data_mode) == {"fixture"}
     assert not pq.read_schema(targets.HOURLY).field("data_mode").nullable
@@ -609,6 +641,25 @@ def test_requests_and_targets_end_to_end_fixture(tmp_path, monkeypatch, all_coho
     assert len(manifest["exclusion_audit"]["threshold_sensitivity"]) == 6
     assert manifest["data_mode"] == "fixture"
     assert sum(r["rows"] for r in manifest["exclusion_counts"]) == len(labels)
+    denominator_path = targets.LABELS.with_name("label_denominators.parquet")
+    denominators = pd.read_parquet(denominator_path)
+    assert denominators.rows.sum() == len(labels)
+    assert manifest["label_denominators_sha256"] == sha256(denominator_path)
+    denominator_manifest = json.loads(
+        denominator_path.with_suffix(".manifest.json").read_text()
+    )
+    assert denominator_manifest["source_labels_sha256"] == manifest["parquet_sha256"]
+    assert denominator_manifest["label_rows"] == len(labels)
+    delay_counts = denominators[
+        denominators.target_kind.eq("departure_delay_gt45")
+        & denominators.cohort_version.eq(requests.COHORT_VERSION)
+    ]
+    assert delay_counts.loc[delay_counts.eligible, "rows"].sum() == 4
+    assert (
+        delay_counts.loc[delay_counts.exclusion_reason.eq("cancelled"), "rows"].sum()
+        == 2
+    )
+    assert denominators.data_mode.eq("fixture").all()
     assert {r["task"] for r in manifest["exclusion_counts"]} == {
         "throughput",
         "severe_delay",
@@ -621,7 +672,7 @@ def test_requests_and_targets_end_to_end_fixture(tmp_path, monkeypatch, all_coho
     ratios = scope[scope.target_kind.eq("throughput_over_clear_weather_p95")]
     assert set(ratios.cohort_version) == {requests.COHORT_VERSION}
     assert len(ratios) == 96
-    assert labels.label_version.eq("0.3.0").all()
+    assert labels.label_version.eq("0.4.0").all()
     assert summary
     if all_cohorts:
         originals = {
@@ -1299,3 +1350,414 @@ def test_schedule_audit_reads_only_declared_schedule_columns(tmp_path, monkeypat
     assert report["raw_reconciliation"].startswith("passed")
     assert report["rows"] == 2
     assert len(report["national_carrier_scope"]) == 1
+
+
+def test_simulated_flight_label_timing_uses_departure_and_latest_flight_time():
+    from airbus_challenge.requests import flight_requests
+    from airbus_challenge.targets import label_rows
+
+    df = outcome_fixture(
+        [row(), row(Flight_Number_Reporting_Airline="124", Cancelled="1")]
+    )
+    req = flight_requests(
+        df,
+        ["KATL"],
+        [3],
+        pd.Timestamp("2023-01-15T00:00Z"),
+        pd.Timestamp("2023-01-16T00:00Z"),
+        "fixture",
+    )
+    fields = ["flight_id", "dep_delay_min", "cancelled", *TIMES]
+    labels = label_rows(req, df[fields], pd.DataFrame(), data_mode="fixture")
+    delays = labels[labels.target_kind.eq("departure_delay_gt45")]
+    cancellations = labels[labels.target_kind.eq("cancellation")]
+    assert delays.iloc[0].outcome_available_at_utc == pd.Timestamp("2023-01-15T15:05Z")
+    assert pd.isna(delays.iloc[1].outcome_available_at_utc)
+    assert cancellations.outcome_available_at_utc.eq(
+        pd.Timestamp("2023-01-16T17:30Z")
+    ).all()
+    assert labels.availability_basis.eq("simulated").all()
+
+
+def test_simulated_hourly_and_ratio_labels_share_hour_end_timing():
+    from airbus_challenge.requests import airport_requests
+    from airbus_challenge.targets import airport_hours, label_rows
+
+    start, end = pd.Timestamp("2023-01-15T17:00Z"), pd.Timestamp("2023-01-15T18:00Z")
+    hourly = airport_hours(
+        outcome_fixture([row()]), "KDFW", start, end, "fixture", data_mode="fixture"
+    )
+    hourly["capacity_ratio_status"] = "available"
+    hourly["throughput_over_clear_weather_p95"] = 0.5
+    req = airport_requests(["KDFW"], [3], start, end, "fixture", "fixture")
+    labels = label_rows(
+        req,
+        pd.DataFrame(),
+        hourly,
+        data_mode="fixture",
+        ratio_target="throughput_over_clear_weather_p95",
+    )
+    assert len(labels) == 2
+    assert labels.outcome_available_at_utc.eq(pd.Timestamp("2023-01-15T18:10Z")).all()
+
+
+@pytest.mark.parametrize(
+    ("latency", "fit_hours", "reference"), [(10, 2, 10.0), (0, 3, 95000.5)]
+)
+def test_reference_fit_respects_simulated_release_cutoff(latency, fit_hours, reference):
+    from copy import deepcopy
+
+    from airbus_challenge.targets import LABEL_AVAILABILITY, add_capacity_ratio
+
+    hourly, weather = capacity_fixture(
+        [
+            ("KATL", "2023-01-01T23:00Z", 10),
+            ("KATL", "2023-12-31T22:00Z", 20),
+            ("KATL", "2023-12-31T23:00Z", 100000),
+        ]
+    )
+    experiment = deepcopy(CAPACITY_EXPERIMENT)
+    experiment["label_availability"] = {
+        **LABEL_AVAILABILITY,
+        "hourly_latency_min": latency,
+    }
+    out, report = add_capacity_ratio(hourly, weather, CONFIG["airports"], experiment)
+    assert report["fit_hours"] == fit_hours
+    assert out.iloc[0].clear_weather_p95_arrivals_per_hour == reference
+    assert out.iloc[2].outcome_available_at_utc == pd.Timestamp(
+        "2024-01-01T00:00Z"
+    ) + pd.Timedelta(minutes=latency)
+
+
+def test_negative_simulated_label_latency_is_rejected():
+    from airbus_challenge.targets import LABEL_AVAILABILITY, label_timing
+
+    with pytest.raises(ValueError, match="Negative"):
+        label_timing({**LABEL_AVAILABILITY, "departure_latency_min": -1})
+
+
+def test_label_denominators_use_target_split_and_preserve_partial_eligibility():
+    from airbus_challenge.targets import label_denominators
+
+    requests = pd.DataFrame(
+        {
+            "prediction_id": ["train", "partial-ok", "partial-excluded"],
+            "cohort_version": ["retrospective_schedule_v1"] * 3,
+            "task": ["throughput"] * 3,
+            "airport_icao": ["KATL"] * 3,
+            "target_start_utc": pd.to_datetime(
+                [
+                    "2023-12-31T23:00Z",
+                    "2024-01-01T00:00Z",
+                    "2024-01-01T01:00Z",
+                ]
+            ),
+            "horizon_h": [3, 6, 6],
+        }
+    )
+    labels = pd.DataFrame(
+        {
+            "prediction_id": requests.prediction_id,
+            "target_kind": ["reporting_carrier_touchdowns"] * 3,
+            "eligible": [True, True, False],
+            "exclusion_reason": [None, None, "coverage_incomplete"],
+            "exclusion_detail": [None, None, "unresolved_arrival_fraction_gt_0.05"],
+            "data_mode": ["fixture"] * 3,
+        }
+    )
+    experiment = {
+        "splits": {
+            "train": {"start": "2023-01-01", "end": "2024-01-01"},
+            "validation": {"start": "2024-01-01", "end": "2024-07-01"},
+        }
+    }
+    counts = label_denominators(requests, labels, experiment)
+    assert counts.rows.sum() == 3
+    validation = counts[counts.split.eq("validation")]
+    assert validation.rows.sum() == 2
+    assert validation.loc[validation.eligible, "rows"].sum() == 1
+    assert validation.target_month.eq("2024-01").all()
+    assert validation.horizon_h.eq(6).all()
+    assert counts.loc[counts.eligible, "exclusion_reason"].isna().all()
+    with pytest.raises(ValueError, match="unknown prediction_id"):
+        label_denominators(requests.iloc[:2], labels, experiment)
+
+
+def operational_hour_fixture():
+    starts = pd.date_range("2023-01-01T00:00Z", periods=4, freq="h")
+    return pd.DataFrame(
+        {
+            "airport_icao": ["KATL"] * 4,
+            "hour_start_utc": starts,
+            "hour_end_utc": starts + pd.Timedelta(hours=1),
+            "reporting_carrier_touchdowns": pd.Series([0, 10, 20, 30], dtype="Int32"),
+            "n_unresolved": [0, 0, 0, 0],
+            "coverage_status": ["complete_for_source_scope"] * 4,
+            "data_mode": ["fixture"] * 4,
+        }
+    )
+
+
+def test_operational_feed_release_latency_blocks_latest_finished_hour():
+    from airbus_challenge.targets import operational_feed
+
+    feed = operational_feed(operational_hour_fixture(), 10)
+    issue = pd.Timestamp("2023-01-01T04:00Z")
+    available = feed[feed.feed_eligible & feed.available_at_utc.le(issue)]
+    assert available.iloc[-1].source_hour_start_utc == pd.Timestamp("2023-01-01T02:00Z")
+    assert available.iloc[-1].reporting_carrier_touchdowns == 20
+    assert feed.iloc[-1].available_at_utc == pd.Timestamp("2023-01-01T04:10Z")
+    assert feed.iloc[0].reporting_carrier_touchdowns == 0
+    assert feed.availability_basis.eq("simulated").all()
+    exact = operational_feed(operational_hour_fixture(), 0)
+    assert exact.available_at_utc.le(issue).all()
+
+
+def test_operational_feed_partial_and_missing_counts_stay_null():
+    from airbus_challenge.targets import operational_feed
+
+    hourly = operational_hour_fixture()
+    hourly.loc[1, ["coverage_status", "n_unresolved"]] = ["partial", 1]
+    hourly.loc[2, "coverage_status"] = "missing"
+    feed = operational_feed(hourly, 10)
+    assert feed.feed_eligible.tolist() == [True, False, False, True]
+    assert feed.reporting_carrier_touchdowns.iloc[1:3].isna().all()
+    assert feed.coverage_status.tolist() == [
+        "complete_for_source_scope",
+        "partial",
+        "missing",
+        "complete_for_source_scope",
+    ]
+    with pytest.raises(ValueError, match="nonnegative"):
+        operational_feed(hourly, -1)
+    with pytest.raises(ValueError, match="Duplicate airport-hour"):
+        operational_feed(pd.concat([hourly, hourly]), 10)
+
+
+@pytest.mark.parametrize(
+    "cohort",
+    ["retrospective_schedule_v1", "csv_only_v1", "loao_KATL_v1", "loao_KDFW_v1"],
+)
+def test_training_selection_enforces_cohort_airports_targets_and_release(cohort):
+    from airbus_challenge.requests import cohort_definitions, flight_requests
+    from airbus_challenge.targets import label_rows, select_training_labels
+
+    df = outcome_fixture(
+        [
+            row(),
+            row(Flight_Number_Reporting_Airline="124", Cancelled="1"),
+            row(Flight_Number_Reporting_Airline="125", Origin="DFW", Dest="ATL"),
+            row(Flight_Number_Reporting_Airline="126", FlightDate="2024-01-01"),
+        ]
+    )
+    df["in_provided_csv"] = True
+    definitions = cohort_definitions(list(CONFIG["airports"]))
+    req = flight_requests(
+        df,
+        list(CONFIG["airports"]),
+        [3, 6],
+        pd.Timestamp("2023-01-01T00:00Z"),
+        pd.Timestamp("2024-01-02T00:00Z"),
+        "fixture",
+        cohort,
+    )
+    labels = label_rows(
+        req,
+        df[["flight_id", "dep_delay_min", "cancelled", *TIMES]],
+        pd.DataFrame(),
+        data_mode="fixture",
+    )
+    # Exact cutoff is inclusive; a later release cannot enter fitting.
+    departed = labels.target_kind.eq("departure_delay_gt45") & labels.eligible
+    labels.loc[departed, "outcome_available_at_utc"] = pd.Timestamp("2024-01-01T00:00Z")
+    late_id = req.loc[
+        req.horizon_h.eq(6) & req.flight_id.eq(df.flight_id.iloc[0]), "prediction_id"
+    ].iloc[0]
+    labels.loc[
+        labels.prediction_id.eq(late_id) & departed, "outcome_available_at_utc"
+    ] += pd.Timedelta(seconds=1)
+    experiment = {
+        "splits": {"train": {"start": "2023-01-01", "end": "2024-01-01"}},
+        "targets": {"capacity_ratio": "throughput_over_clear_weather_p95"},
+    }
+    selected = select_training_labels(
+        req, labels, cohort, definitions[cohort], experiment, "2024-01-01T00:00Z"
+    )
+    assert set(selected.airport_icao) <= set(definitions[cohort]["train_airports"])
+    assert selected.target_start_utc.lt(pd.Timestamp("2024-01-01T00:00Z")).all()
+    assert selected.outcome_available_at_utc.le(selected.fit_cutoff_utc).all()
+    assert selected.eligible.all()
+    assert not (
+        selected.prediction_id.eq(late_id)
+        & selected.target_kind.eq("departure_delay_gt45")
+    ).any()
+    cancelled_ids = req.loc[req.flight_id.eq(df.flight_id.iloc[1]), "prediction_id"]
+    assert not (
+        selected.prediction_id.isin(cancelled_ids)
+        & selected.target_kind.eq("departure_delay_gt45")
+    ).any()
+    if "KATL" in definitions[cohort]["train_airports"]:
+        assert (
+            selected.prediction_id.isin(cancelled_ids)
+            & selected.target_kind.eq("cancellation")
+        ).sum() == 2
+    with pytest.raises(ValueError, match="timezone"):
+        select_training_labels(
+            req, labels, cohort, definitions[cohort], experiment, "2024-01-01"
+        )
+
+
+def test_training_selection_rejects_unknown_availability_and_holdout_ratio():
+    from airbus_challenge.requests import cohort_definitions
+    from airbus_challenge.targets import select_training_labels
+
+    req = pd.DataFrame(
+        {
+            "prediction_id": ["p"],
+            "cohort_version": ["loao_KATL_v1"],
+            "airport_icao": ["KDFW"],
+            "task": ["throughput"],
+            "target_start_utc": [pd.Timestamp("2023-01-01T00:00Z")],
+            "data_mode": ["fixture"],
+        }
+    )
+    labels = pd.DataFrame(
+        {
+            "prediction_id": ["p"],
+            "target_kind": ["reporting_carrier_touchdowns"],
+            "eligible": [True],
+            "y_true": [1],
+            "outcome_available_at_utc": [pd.Timestamp("2023-01-01T01:10Z")],
+            "availability_basis": ["unknown"],
+        }
+    )
+    definition = cohort_definitions(list(CONFIG["airports"]))["loao_KATL_v1"]
+    experiment = {
+        "splits": {"train": {"start": "2023-01-01", "end": "2024-01-01"}},
+        "targets": {"capacity_ratio": "throughput_over_clear_weather_p95"},
+    }
+    with pytest.raises(ValueError, match="availability basis"):
+        select_training_labels(
+            req, labels, "loao_KATL_v1", definition, experiment, "2024-01-01T00:00Z"
+        )
+    labels["availability_basis"] = "simulated"
+    labels["target_kind"] = "throughput_over_clear_weather_p95"
+    with pytest.raises(ValueError, match="forbidden"):
+        select_training_labels(
+            req, labels, "loao_KATL_v1", definition, experiment, "2024-01-01T00:00Z"
+        )
+
+
+def replay_fixture():
+    from airbus_challenge.requests import flight_requests
+    from airbus_challenge.targets import label_rows
+
+    df = outcome_fixture(
+        [row(), row(Flight_Number_Reporting_Airline="124", Cancelled="1")]
+    )
+    req = flight_requests(
+        df,
+        ["KATL"],
+        [3],
+        pd.Timestamp("2023-01-15T00:00Z"),
+        pd.Timestamp("2023-01-16T00:00Z"),
+        "fixture",
+    )
+    labels = label_rows(
+        req,
+        df[["flight_id", "dep_delay_min", "cancelled", *TIMES]],
+        pd.DataFrame(),
+        data_mode="fixture",
+    )
+    return req, labels
+
+
+def test_replay_payload_hides_outcomes_and_release_times_until_release():
+    from airbus_challenge.targets import replay_outcomes
+
+    req, labels = replay_fixture()
+    before = replay_outcomes(req, labels, "2023-01-15T15:04:59Z")
+    assert before.outcome_status.eq("not_released").all()
+    for column in [
+        "y_true",
+        "eligible",
+        "exclusion_reason",
+        "exclusion_detail",
+        "outcome_available_at_utc",
+    ]:
+        assert before[column].isna().all()
+    exact = replay_outcomes(req, labels, "2023-01-15T15:05:00Z")
+    known = exact[exact.outcome_status.eq("revealed")]
+    assert len(known) == 1 and known.y_true.iloc[0] == 0
+    assert known.eligible.iloc[0]
+    later = replay_outcomes(req, labels, "2023-01-17T00:00Z")
+    assert later.outcome_status.eq("revealed").sum() == 3
+    cancelled = later[later.target_kind.eq("cancellation")]
+    assert sorted(cancelled.y_true.tolist()) == [0, 1]
+    assert not {
+        "flight_id",
+        "scheduled_dep_utc",
+        "quality_flags",
+        "dep_delay_min",
+    } & set(later.columns)
+    with pytest.raises(ValueError, match="timezone-aware"):
+        replay_outcomes(req, labels, "2023-01-17")
+    with pytest.raises(ValueError, match="Duplicate replay outcome"):
+        replay_outcomes(req, pd.concat([labels, labels]), "2023-01-17T00:00Z")
+
+
+def test_replay_loader_projects_only_released_outcome_values(tmp_path, monkeypatch):
+    import yaml
+
+    from airbus_challenge import targets
+
+    req, labels = replay_fixture()
+    path = tmp_path / "labels.parquet"
+    labels.to_parquet(path, index=False)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "configs").mkdir()
+    (tmp_path / "configs/experiment.yaml").write_text(
+        yaml.safe_dump({"splits": {"test": {"start": "2025-01-01"}}})
+    )
+    real_dataset = targets.ds.dataset(path)
+    reads = []
+
+    class TrackedDataset:
+        def to_table(self, **kwargs):
+            table = real_dataset.to_table(**kwargs)
+            reads.append((kwargs["columns"], table.num_rows))
+            return table
+
+    monkeypatch.setattr(targets.ds, "dataset", lambda path: TrackedDataset())
+    out = targets.load_replay_outcomes(req, path, "2023-01-15T15:05Z")
+    assert "y_true" not in reads[0][0] and "eligible" not in reads[0][0]
+    assert reads[0][1] == 4
+    assert "y_true" in reads[1][0] and reads[1][1] == 1
+    assert out.outcome_status.eq("revealed").sum() == 1
+    pending = out[out.outcome_status.eq("not_released")]
+    assert pending.y_true.isna().all() and pending.outcome_available_at_utc.isna().all()
+
+
+def test_development_replay_rejects_test_targets_before_opening_labels(
+    tmp_path, monkeypatch
+):
+    import yaml
+
+    from airbus_challenge import targets
+
+    req, _ = replay_fixture()
+    req["target_start_utc"] = pd.Timestamp("2025-01-01T00:00Z")
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "configs").mkdir()
+    (tmp_path / "configs/experiment.yaml").write_text(
+        yaml.safe_dump({"splits": {"test": {"start": "2025-01-01"}}})
+    )
+
+    def forbidden_read(*args, **kwargs):
+        raise AssertionError("Test labels must not be opened")
+
+    monkeypatch.setattr(targets.ds, "dataset", forbidden_read)
+    with pytest.raises(ValueError, match="test-period"):
+        targets.load_replay_outcomes(
+            req, tmp_path / "absent.parquet", "2025-01-02T00:00Z"
+        )
