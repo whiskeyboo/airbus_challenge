@@ -1,3 +1,5 @@
+import json
+
 import pandas as pd
 import pytest
 
@@ -7,6 +9,7 @@ from airbus_challenge.recommend import (
     THRESHOLD_LABEL,
     THRESHOLDS,
     advisories,
+    load_policy,
     recommend,
 )
 
@@ -125,3 +128,50 @@ def test_contract_violations_fail_loudly():
     two = pd.concat([preds(), preds().assign(as_of_utc=AS_OF + pd.Timedelta(hours=1))])
     with pytest.raises(ValueError, match="one airport"):
         recommend(two, reference())
+
+
+def calibration_json(tmp_path, act=0.5, watch=0.3, act_ratio=0.70, margin=5.0):
+    th = lambda t: {
+        "pooled": {"threshold": t},
+        "KATL": {"threshold": t, "pooled": False},
+    }
+    cal = {
+        "policy_version": "wp-d7-v1",
+        "calibrators": {SEVERE: {f"m-{SEVERE}": {"x": [0.0, 0.1, 1.0], "y": [0.0, 0.6, 0.9]}}},
+        "severe_delay_thresholds": {f"m-{SEVERE}": {"act": th(act), "watch": th(watch)}},
+        "throughput_interval": {f"m-{TARGET}": {"KATL": {"margin": margin}}},
+        "throughput_alert": {f"m-{TARGET}": {"act_ratio": act_ratio, "watch_ratio": 0.85}},
+    }  # fmt: skip
+    (tmp_path / "calibration.json").write_text(json.dumps(cal))
+    return load_policy(tmp_path)
+
+
+def test_policy_from_calibration_json(tmp_path):
+    assert load_policy(tmp_path) is THRESHOLDS  # no file -> provisional
+    policy = calibration_json(tmp_path)
+    assert policy["label"] == "wp-d7-v1"
+    assert policy["source"] == str(tmp_path / "calibration.json")
+    rec = recommend(preds(tp=95.0, p10=72.0, delay=(0.1,)), reference(), policy)
+    assert rec["threshold_label"] == "wp-d7-v1" and "provisional" not in rec["message"]
+    assert set(advisories([rec]).threshold_label) == {"wp-d7-v1"}
+    sd, tp = by_kind(rec)["severe_delay"], by_kind(rec)["throughput"]
+    assert sd["level"] == "act"
+    assert sd["numbers"]["max_probability"] == pytest.approx(0.6)  # calibrated
+    assert tp["level"] == "act" and tp["numbers"]["p10_widened"] == 67.0  # 72-5 < 70
+    old = recommend(preds(tp=95.0, p10=72.0, delay=(0.1,)), reference())
+    assert by_kind(old)["severe_delay"]["level"] == "normal"
+    assert by_kind(old)["throughput"]["level"] == "normal"
+
+
+def test_null_threshold_never_alerts(tmp_path):
+    policy = calibration_json(tmp_path, act=None, watch=None, act_ratio=None)
+    rec = recommend(preds(tp=95.0, p10=10.0, delay=(0.99,)), reference(), policy)
+    sd, tp = by_kind(rec)["severe_delay"], by_kind(rec)["throughput"]
+    assert sd["level"] == "abstain" and "no_threshold_meets_precision" in sd["reasons"]
+    assert sd["numbers"]["n_above_act"] == 0
+    assert tp["level"] == "normal"  # p10 far below the ceiling, but act ratio is null
+    only_watch = calibration_json(tmp_path, act=None, watch=0.3)
+    sd = by_kind(recommend(preds(delay=(0.99,)), reference(), only_watch))[
+        "severe_delay"
+    ]
+    assert sd["level"] == "watch"
