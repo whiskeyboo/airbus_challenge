@@ -15,7 +15,7 @@ FLIGHTS = Path("data/processed/flights.parquet")
 REQUESTS = Path("data/processed/prediction_requests.parquet")
 HOURLY = Path("data/processed/airport_hourly.parquet")
 LABELS = Path("data/labels/labels.parquet")
-VERSION = "0.5.0"
+VERSION = "0.5.1"
 LABEL_VERSION = "0.4.0"
 METRICS = {
     "scheduled_departures": (
@@ -654,6 +654,56 @@ def split_name(times, experiment):
     return result
 
 
+DENOMINATOR_KEYS = [
+    "cohort_version",
+    "task",
+    "target_kind",
+    "airport_icao",
+    "target_month",
+    "split",
+    "horizon_h",
+    "eligible",
+    "exclusion_reason",
+    "exclusion_detail",
+    "data_mode",
+]
+
+
+def label_denominators(requests, labels, experiment):
+    context = requests[
+        [
+            "prediction_id",
+            "cohort_version",
+            "task",
+            "airport_icao",
+            "target_start_utc",
+            "horizon_h",
+        ]
+    ].copy()
+    context["target_month"] = context.target_start_utc.dt.strftime("%Y-%m")
+    context["split"] = split_name(context.target_start_utc, experiment)
+    joined = labels[
+        [
+            "prediction_id",
+            "target_kind",
+            "eligible",
+            "exclusion_reason",
+            "exclusion_detail",
+            "data_mode",
+        ]
+    ].merge(
+        context, on="prediction_id", how="left", validate="many_to_one", indicator=True
+    )
+    if not joined._merge.eq("both").all():
+        raise ValueError("Label denominator contains an unknown prediction_id")
+    return (
+        joined.groupby(DENOMINATOR_KEYS, dropna=False)
+        .size()
+        .rename("rows")
+        .reset_index()
+    )
+
+
 def exclusion_audit(hourly, flights, experiment, weather):
     # Retrospective weather slices only; they never participate in requests or features.
     weather = weather.copy()
@@ -953,6 +1003,7 @@ def build(requests_path=None, output_dir=None, reuse_hourly=False):
     tmp = labels_path.with_name(".labels.parquet.tmp")
     summaries = []
     exclusion_summaries = []
+    denominator_summaries = []
     rows = 0
     with pq.ParquetWriter(tmp, LABEL_SCHEMA) as writer:
         for batch in pq.ParquetFile(requests_path).iter_batches(
@@ -965,6 +1016,7 @@ def build(requests_path=None, output_dir=None, reuse_hourly=False):
                 "target_start_utc",
                 "data_mode",
                 "cohort_version",
+                "horizon_h",
             ],
         ):
             requests = batch.to_pandas()
@@ -985,6 +1037,9 @@ def build(requests_path=None, output_dir=None, reuse_hourly=False):
                 pa.Table.from_pandas(labels, schema=LABEL_SCHEMA, preserve_index=False)
             )
             rows += len(labels)
+            denominator_summaries.append(
+                label_denominators(requests, labels, experiment)
+            )
             context = requests.set_index("prediction_id")[["task", "cohort_version"]]
             exclusion_summaries.append(
                 labels.join(context, on="prediction_id", validate="many_to_one")
@@ -1035,6 +1090,28 @@ def build(requests_path=None, output_dir=None, reuse_hourly=False):
         .where(exclusion_counts.notna(), None)
         .to_dict(orient="records")
     )
+    denominators = (
+        pd.concat(denominator_summaries)
+        .groupby(DENOMINATOR_KEYS, dropna=False, as_index=False)["rows"]
+        .sum()
+    )
+    denominator_path = labels_path.with_name("label_denominators.parquet")
+    denominator_tmp = denominator_path.with_name(".label_denominators.parquet.tmp")
+    denominators.to_parquet(denominator_tmp, index=False)
+    denominator_tmp.replace(denominator_path)
+    write_manifest(
+        denominator_path,
+        len(denominators),
+        manifest,
+        {
+            "schema_version": "1.0.0",
+            "source_requests_sha256": request_manifest["parquet_sha256"],
+            "source_labels_sha256": sha256(labels_path),
+            "label_rows": int(denominators.rows.sum()),
+            "grouping": DENOMINATOR_KEYS,
+            "population": "archive label rows before model-specific fit/scoring cutoffs; each horizon and target is counted separately",
+        },
+    )
     write_manifest(
         labels_path,
         rows,
@@ -1043,6 +1120,7 @@ def build(requests_path=None, output_dir=None, reuse_hourly=False):
             "schema_version": LABEL_VERSION,
             "source_requests_sha256": request_manifest["parquet_sha256"],
             "summary": summary,
+            "label_denominators_sha256": sha256(denominator_path),
             "exclusion_counts": exclusion_counts,
             "exclusion_reason_mapping": EXCLUSION_REASONS,
             "cohorts": definitions,
