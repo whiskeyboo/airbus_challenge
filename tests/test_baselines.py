@@ -92,6 +92,23 @@ def test_persistence_uses_a_partial_hour_with_a_target(hourly):
 
 
 @pytest.mark.parametrize(
+    ("baseline", "source"),
+    [(persistence, "2024-03-05 11:00"), (seasonal_persistence, "2024-02-27 15:00")],
+)
+def test_a_partial_source_hour_is_marked_and_stays_available(hourly, baseline, source):
+    requests = make_requests("KATL", [ts(UTC_TIME), ts("2024-03-05 16:00")], [3])
+    partial = airport_rows(hourly, "KATL", hourly["hour_start_utc"].eq(ts(source)))
+    hourly.loc[partial, "coverage_status"] = "partial"
+    result = baseline(requests, hourly)
+    assert result["status"].tolist() == ["available", "available"]
+    assert result["estimate"].notna().all()
+    assert result["reason_codes"].tolist() == [
+        [SIMULATED_FEED, "source_hour_partial"],
+        [SIMULATED_FEED],
+    ]
+
+
+@pytest.mark.parametrize(
     ("coverage", "target"),
     [("partial", pd.NA), ("missing", 7), ("complete_for_source_scope", pd.NA)],
 )
@@ -241,14 +258,14 @@ def test_climatology_keys_on_local_weekday(hourly):
     assert result["estimate"].tolist() == [100, 0]
 
 
-def test_climatology_falls_back_on_a_sparse_cell(hourly):
+def test_climatology_serves_no_unvalidated_fallback_on_a_sparse_cell(hourly):
     train = train_rows(hourly)
     train = train[train["hour_start_utc"].lt(ts("2023-02-15"))]  # About 6 per weekday.
     target = ts("2024-03-05 15:00")
     result = climatology(make_requests("KATL", [target], [3]), fit_climatology(train))
-    assert result["status"].item() == "degraded"
-    assert result["reason_codes"].item() == ["climatology_hour_fallback"]
-    assert result["estimate"].notna().item()
+    assert result["status"].item() == "unavailable"
+    assert result["reason_codes"].item() == ["climatology_cell_sparse"]
+    assert result["estimate"].isna().item()
 
 
 def test_climatology_is_unavailable_for_an_airport_held_out_of_train(hourly):
@@ -260,8 +277,7 @@ def test_climatology_is_unavailable_for_an_airport_held_out_of_train(hourly):
 
 
 def schedule_fit_for(icao: str, slope: float, intercept: float) -> dict:
-    line = {"slope": slope, "intercept": intercept, "n_train": 1}
-    return {"airports": {icao: line}, "pooled": line}
+    return {"airports": {icao: {"slope": slope, "intercept": intercept, "n_train": 1}}}
 
 
 def test_schedule_fit_recovers_each_airports_train_relation(hourly):
@@ -273,27 +289,26 @@ def test_schedule_fit_recovers_each_airports_train_relation(hourly):
     assert fit["airports"]["KATL"]["intercept"] == pytest.approx(2)
     assert fit["airports"]["KDFW"]["slope"] == pytest.approx(0.7)
     assert fit["airports"]["KDFW"]["intercept"] == pytest.approx(1)
-    assert 0.7 < fit["pooled"]["slope"] < 0.9
 
 
 def test_schedule_only_uses_the_airports_own_line(hourly):
     target = airport_rows(hourly, "KDFW", hourly["hour_start_utc"].eq(ts(UTC_TIME)))
     hourly.loc[target, "scheduled_arrivals"] = 10
     fit = schedule_fit_for("KDFW", 0.5, 1.0)
-    fit["pooled"] = {"slope": 2.0, "intercept": 0.0, "n_train": 1}
+    fit["airports"]["KATL"] = {"slope": 2.0, "intercept": 0.0, "n_train": 1}
     result = schedule_only(make_requests("KDFW", [ts(UTC_TIME)], [3]), hourly, fit)
     assert result["estimate"].item() == 6
     assert result["status"].item() == "available"
     assert result["reason_codes"].item() == [RETROSPECTIVE_SCHEDULE]
 
 
-def test_schedule_only_uses_pooled_line_for_an_airport_held_out_of_train(hourly):
+def test_schedule_only_is_unavailable_for_an_airport_held_out_of_train(hourly):
     target = airport_rows(hourly, "KDFW", hourly["hour_start_utc"].eq(ts(UTC_TIME)))
     hourly.loc[target, "scheduled_arrivals"] = 10
     fit = schedule_fit_for("KATL", 0.5, 1.0)
     result = schedule_only(make_requests("KDFW", [ts(UTC_TIME)], [3]), hourly, fit)
-    assert result["estimate"].item() == 6
-    assert result["status"].item() == "degraded"
+    assert result["estimate"].isna().item()
+    assert result["status"].item() == "unavailable"
     assert result["reason_codes"].item() == [
         RETROSPECTIVE_SCHEDULE,
         "airport_not_in_train",
@@ -385,7 +400,7 @@ def test_fits_use_partial_hours_with_a_target_and_skip_null_ones(hourly):
     hourly.loc[in_train, "coverage_status"] = "partial"
     used = fit_climatology(train_rows(hourly))
     hourly.loc[in_train, TARGET] = 999
-    assert not fit_climatology(train_rows(hourly))["hour"].equals(used["hour"])
+    assert not fit_climatology(train_rows(hourly)).equals(used)
     hourly.loc[in_train, TARGET] = pd.NA
     rows = train_rows(hourly)
     assert not rows["hour_start_utc"].between(ts("2023-05-01"), ts("2023-06-01")).any()
@@ -527,16 +542,54 @@ def real_inputs(hourly, tmp_path):
 def test_outcomes_load_only_after_the_claim(hourly, tmp_path, clean_git, monkeypatch):
     inputs, _ = real_inputs(hourly, tmp_path)
     claim = tmp_path / "locked_runs" / "baselines_locked_test.json"
-    read, seen = pd.read_parquet, []
+    read, reads = pd.read_parquet, []
 
     def spy(path, columns=None, **kwargs):
-        if path == inputs[0] and (columns is None or TARGET in columns):
-            seen.append(claim.exists())
+        if path == inputs[0]:
+            reads.append((columns, claim.exists()))
         return read(path, columns=columns, **kwargs)
 
     monkeypatch.setattr(baselines.pd, "read_parquet", spy)
     main(*inputs, tmp_path / "artifacts", **locked_args(tmp_path))
-    assert seen == [True]
+    assert all(columns is not None for columns, _ in reads)
+    before = {c for columns, claimed in reads if not claimed for c in columns}
+    after = {c for columns, claimed in reads if claimed for c in columns}
+    assert not before & {TARGET, "coverage_status", "scheduled_arrivals"}
+    assert {TARGET, "coverage_status", "scheduled_arrivals"} <= after
+    # Only the join keys are read twice; everything read is used.
+    keys = ["airport_icao", "hour_start_utc"]
+    read_columns = [c for columns, _ in reads for c in columns if c not in keys]
+    assert len(read_columns) == len(set(read_columns))
+    assert set(read_columns) == {
+        "source_snapshot_id",
+        "data_mode",
+        "schedule_knowledge_basis",
+        TARGET,
+        "coverage_status",
+        "scheduled_arrivals",
+    }
+
+
+def test_main_checks_inputs_once_and_matches_the_full_table(
+    hourly, tmp_path, clean_git, monkeypatch
+):
+    requests = _sample_requests()
+    inputs = write_inputs(hourly, requests, tmp_path)
+    check, calls = baselines.check_inputs, []
+
+    def spy(*args):
+        calls.append(args)
+        return check(*args)
+
+    monkeypatch.setattr(baselines, "check_inputs", spy)
+    written = pd.read_parquet(main(*inputs, tmp_path / "artifacts"))
+    assert len(calls) == 1
+    monkeypatch.undo()
+    expected, _ = baseline_predictions(hourly, requests)
+    for frame in (written, expected):
+        frame["reason_codes"] = frame["reason_codes"].map(list)
+    columns = ["prediction_id", "model_version", "estimate", "status", "reason_codes"]
+    pd.testing.assert_frame_equal(written[columns], expected[columns])
 
 
 @pytest.mark.parametrize(
@@ -830,6 +883,8 @@ def test_unknown_task_is_rejected(hourly):
 def test_main_writes_contract_schema_and_fixture_manifest(hourly, tmp_path):
     target = hourly["hour_start_utc"].eq(ts("2024-03-01 08:00"))  # h=3 source hour.
     hourly.loc[target, "coverage_status"] = "missing"
+    partial = hourly["hour_start_utc"].eq(ts("2024-03-01 05:00"))  # h=6 source hour.
+    hourly.loc[partial, "coverage_status"] = "partial"
     inputs = write_inputs(hourly, _sample_requests(), tmp_path)
 
     path = main(*inputs, tmp_path / "artifacts")
@@ -846,4 +901,8 @@ def test_main_writes_contract_schema_and_fixture_manifest(hourly, tmp_path):
     assert set(manifest["schedule_fit"]["airports"]) == {"KATL", "KDFW"}
     persistence_counts = manifest["status_counts"]["baseline_persistence_v1"]
     assert persistence_counts["unavailable"] == 2  # One source hour, both airports.
+    reasons = manifest["reason_counts"]
+    assert reasons["baseline_persistence_v1"]["source_hour_incomplete"] == 2
+    assert reasons["baseline_persistence_v1"]["source_hour_partial"] == 2
+    assert reasons["baseline_climatology_v1"]["source_hour_partial"] == 0
     assert manifest["fit_cutoff_utc"] == "2024-01-01T00:00:00+00:00"

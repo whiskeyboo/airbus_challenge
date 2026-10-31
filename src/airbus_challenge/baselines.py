@@ -28,8 +28,13 @@ VERSION = "baseline-v1"
 SCHEMA_VERSION = "0.1.0"
 HOUR = pd.Timedelta(hours=1)
 WEEK = pd.Timedelta(days=7)
-# A thinner airport x local hour x weekday cell uses airport x local hour.
+# A thinner airport x local hour x weekday cell is unavailable: no fallback is
+# validated yet (WP-D7), so none is served as degraded.
 MIN_CELL_N = 8
+KEYS = ["airport_icao", "hour_start_utc"]
+# Outcome-free, so a bad locked run is refused before it is claimed.
+CONTEXT_COLUMNS = [*KEYS, "source_snapshot_id", "data_mode", "schedule_knowledge_basis"]
+OUTCOME_COLUMNS = [*KEYS, TARGET, "coverage_status", "scheduled_arrivals"]
 
 # BTS publishes months later, so no live feed existed.
 SIMULATED_FEED = "simulated_feed"
@@ -132,13 +137,17 @@ def _from_feed(
 ) -> pd.DataFrame:
     if (source_hour + HOUR > requests["as_of_utc"]).any():
         raise ValueError(f"{model}: source hour ends after issue time")
-    values = observed(hourly).set_index(["airport_icao", "hour_start_utc"])[TARGET]
     keys = pd.MultiIndex.from_arrays([requests["airport_icao"], source_hour])
-    estimate = values.astype("float64").reindex(keys).to_numpy()
+    source = observed(hourly).set_index(KEYS)[[TARGET, "coverage_status"]].reindex(keys)
+    estimate = source[TARGET].astype("float64").to_numpy()
     found = ~np.isnan(estimate)
+    # P12: a partial hour has unresolved arrivals, so its count may be low.
+    partial = source["coverage_status"].eq("partial").to_numpy()
     reasons = [
-        [SIMULATED_FEED] if ok else [SIMULATED_FEED, "source_hour_incomplete"]
-        for ok in found
+        [SIMULATED_FEED]
+        + ([] if ok else ["source_hour_incomplete"])
+        + (["source_hour_partial"] if low else [])
+        for ok, low in zip(found, partial)
     ]
     status = np.where(found, "available", "unavailable")
     return _predictions(requests, model, estimate, status, reasons)
@@ -167,37 +176,27 @@ def seasonal_persistence(requests: pd.DataFrame, hourly: pd.DataFrame) -> pd.Dat
     return _from_feed(requests, hourly, source_hour, "baseline_seasonal_persistence_v1")
 
 
-def fit_climatology(train: pd.DataFrame) -> dict[str, pd.Series]:
+CELL = ["airport_icao", "local_hour", "local_weekday"]
+
+
+def fit_climatology(train: pd.DataFrame) -> pd.DataFrame:
     rows = pd.concat([train, _local_time(train, "hour_start_utc")], axis=1)
     rows[TARGET] = rows[TARGET].astype("float64")
-    cells = rows.groupby(["airport_icao", "local_hour", "local_weekday"])[TARGET]
-    means = cells.mean()
-    return {
-        "cell": means[cells.size() >= MIN_CELL_N],
-        "hour": rows.groupby(["airport_icao", "local_hour"])[TARGET].mean(),
-    }
+    return rows.groupby(CELL)[TARGET].agg(["mean", "size"])
 
 
-def climatology(requests: pd.DataFrame, fit: dict[str, pd.Series]) -> pd.DataFrame:
+def climatology(requests: pd.DataFrame, fit: pd.DataFrame) -> pd.DataFrame:
     keys = _local_time(requests, "target_start_utc").assign(
         airport_icao=requests["airport_icao"]
     )
-    cell_keys = pd.MultiIndex.from_frame(
-        keys[["airport_icao", "local_hour", "local_weekday"]]
-    )
-    hour_keys = pd.MultiIndex.from_frame(keys[["airport_icao", "local_hour"]])
-    cell = fit["cell"].reindex(cell_keys).to_numpy()
-    estimate = np.where(np.isnan(cell), fit["hour"].reindex(hour_keys).to_numpy(), cell)
-    fallback = np.isnan(cell) & ~np.isnan(estimate)
-    status = np.select(
-        [np.isnan(estimate), fallback], ["unavailable", "degraded"], "available"
-    )
-    reason_by_status = {
-        "unavailable": ["no_train_history"],
-        "degraded": ["climatology_hour_fallback"],
-        "available": [],
-    }
-    reasons = [reason_by_status[s] for s in status]
+    cells = fit.reindex(pd.MultiIndex.from_frame(keys[CELL]))
+    estimate = cells["mean"].where(cells["size"].ge(MIN_CELL_N)).to_numpy()
+    seen = requests["airport_icao"].isin(fit.index.get_level_values("airport_icao"))
+    reasons = [
+        [] if ok else ["climatology_cell_sparse"] if in_train else ["no_train_history"]
+        for ok, in_train in zip(~np.isnan(estimate), seen)
+    ]
+    status = np.where(np.isnan(estimate), "unavailable", "available")
     return _predictions(requests, "baseline_climatology_v1", estimate, status, reasons)
 
 
@@ -210,36 +209,35 @@ def _schedule_line(rows: pd.DataFrame) -> dict[str, float]:
 
 def fit_schedule(train: pd.DataFrame) -> dict:
     rows = train[train["scheduled_arrivals"].notna()]
-    airports = {icao: _schedule_line(g) for icao, g in rows.groupby("airport_icao")}
-    return {"airports": airports, "pooled": _schedule_line(rows)}
+    return {
+        "airports": {
+            icao: _schedule_line(g) for icao, g in rows.groupby("airport_icao")
+        }
+    }
 
 
 def schedule_only(
     requests: pd.DataFrame, hourly: pd.DataFrame, fit: dict
 ) -> pd.DataFrame:
-    schedule = hourly.set_index(["airport_icao", "hour_start_utc"])[
-        "scheduled_arrivals"
-    ]
+    schedule = hourly.set_index(KEYS)["scheduled_arrivals"]
     keys = pd.MultiIndex.from_arrays(
         [requests["airport_icao"], requests["target_start_utc"]]
     )
     scheduled = schedule.astype("float64").reindex(keys).to_numpy()
-    # An airport held out of train has no fit of its own, so it gets the pooled line.
-    lines = [
-        fit["airports"].get(icao, fit["pooled"]) for icao in requests["airport_icao"]
-    ]
-    slope = np.array([line["slope"] for line in lines])
-    intercept = np.array([line["intercept"] for line in lines])
-    estimate = np.clip(intercept + slope * scheduled, 0, None)
-    found = ~np.isnan(estimate)
+    # A held-out airport has no line; a pooled one is unvalidated (WP-D7).
+    lines = pd.DataFrame(fit["airports"]).T.reindex(requests["airport_icao"])
+    estimate = np.clip(
+        lines["intercept"].to_numpy() + lines["slope"].to_numpy() * scheduled, 0, None
+    )
+    has_schedule = ~np.isnan(scheduled)
     seen = requests["airport_icao"].isin(fit["airports"]).to_numpy()
     reasons = [
         [RETROSPECTIVE_SCHEDULE]
         + ([] if ok else ["schedule_missing"])
         + ([] if in_train else ["airport_not_in_train"])
-        for ok, in_train in zip(found, seen)
+        for ok, in_train in zip(has_schedule, seen)
     ]
-    status = np.select([~found, ~seen], ["unavailable", "degraded"], "available")
+    status = np.where(np.isnan(estimate), "unavailable", "available")
     return _predictions(requests, "baseline_schedule_v1", estimate, status, reasons)
 
 
@@ -329,7 +327,12 @@ def scored_requests(
 def baseline_predictions(
     hourly: pd.DataFrame, requests: pd.DataFrame, locked_test: bool = False
 ) -> tuple[pd.DataFrame, dict]:
-    scored = scored_requests(hourly, requests, locked_test)
+    return predict_scored(hourly, scored_requests(hourly, requests, locked_test))
+
+
+def predict_scored(
+    hourly: pd.DataFrame, scored: pd.DataFrame
+) -> tuple[pd.DataFrame, dict]:
     train = observed(in_split(hourly, "train", "hour_start_utc"))
     schedule_fit = fit_schedule(train)
     return pd.concat(
@@ -419,18 +422,7 @@ def main(
     test_start, _ = split_bounds("test")
     # Dev runs never load 2025 outcomes (docs/WORK_PLAN.md test-set rule).
     filters = None if locked_test else [("hour_start_utc", "<", test_start)]
-    # These columns hold no outcomes, so a bad run is refused before it is claimed.
-    context = pd.read_parquet(
-        hourly_path,
-        columns=[
-            "airport_icao",
-            "hour_start_utc",
-            "source_snapshot_id",
-            "data_mode",
-            "schedule_knowledge_basis",
-        ],
-        filters=filters,
-    )
+    context = pd.read_parquet(hourly_path, columns=CONTEXT_COLUMNS, filters=filters)
     requests = pd.read_parquet(requests_path)
     snapshots = context["source_snapshot_id"].unique()
     if len(snapshots) != 1:
@@ -446,15 +438,22 @@ def main(
     schedule_bases = context["schedule_knowledge_basis"].unique()
     if len(schedule_bases) != 1 or pd.isna(schedule_bases[0]):
         raise ValueError(f"expected one schedule basis, found {schedule_bases}")
-    scored_requests(context, requests, locked_test)
+    scored = scored_requests(context, requests, locked_test)
     if locked_test:
         claim_locked_run(run_id, approved_by, commit, ledger)
-    hourly = pd.read_parquet(hourly_path, filters=filters)
-    predictions, schedule_fit = baseline_predictions(hourly, requests, locked_test)
+    outcomes = pd.read_parquet(hourly_path, columns=OUTCOME_COLUMNS, filters=filters)
+    hourly = context.merge(outcomes, on=KEYS, validate="one_to_one")
+    predictions, schedule_fit = predict_scored(hourly, scored)
     predictions = predictions.assign(
         data_snapshot_id=str(snapshots[0]), generated_at_utc=datetime.now(UTC)
     )
     counts = pd.crosstab(predictions["model_version"], predictions["status"])
+    codes = predictions[["model_version", "reason_codes"]].explode("reason_codes")
+    reason_counts = pd.crosstab(codes["model_version"], codes["reason_codes"]).reindex(
+        index=counts.index,
+        columns=sorted({*codes["reason_codes"].dropna(), "source_hour_partial"}),
+        fill_value=0,
+    )
     manifest = {
         "run_id": run_id,
         "producer": "airbus_challenge.baselines",
@@ -482,6 +481,7 @@ def main(
         "target_start_max_utc": predictions["target_start_utc"].max().isoformat(),
         "rows": len(predictions),
         "status_counts": counts.to_dict("index"),
+        "reason_counts": reason_counts.to_dict("index"),
     }
     write_predictions(predictions, path)
     part = path.with_name("manifest.json.part")
