@@ -15,7 +15,7 @@ FLIGHTS = Path("data/processed/flights.parquet")
 REQUESTS = Path("data/processed/prediction_requests.parquet")
 HOURLY = Path("data/processed/airport_hourly.parquet")
 LABELS = Path("data/labels/labels.parquet")
-VERSION = "0.5.1"
+VERSION = "0.6.0"
 LABEL_VERSION = "0.4.0"
 METRICS = {
     "scheduled_departures": (
@@ -654,6 +654,122 @@ def split_name(times, experiment):
     return result
 
 
+def operational_feed(hourly, latency_min):
+    latency = pd.Timedelta(minutes=latency_min)
+    if pd.isna(latency) or latency < pd.Timedelta(0):
+        raise ValueError("Operational feed latency must be finite and nonnegative")
+    if hourly.duplicated(["airport_icao", "hour_start_utc"]).any():
+        raise ValueError("Duplicate airport-hour in operational feed")
+    if not hourly.coverage_status.isin(
+        ["complete_for_source_scope", "partial", "missing"]
+    ).all():
+        raise ValueError("Unknown operational feed coverage_status")
+    for mode in hourly.data_mode.unique():
+        validate_data_mode(mode)
+    if hourly.data_mode.nunique() != 1:
+        raise ValueError("Operational feed requires one data_mode")
+    feed = (
+        hourly[
+            [
+                "airport_icao",
+                "hour_start_utc",
+                "hour_end_utc",
+                "reporting_carrier_touchdowns",
+                "n_unresolved",
+                "coverage_status",
+                "data_mode",
+            ]
+        ]
+        .rename(
+            columns={
+                "hour_start_utc": "source_hour_start_utc",
+                "hour_end_utc": "source_hour_end_utc",
+            }
+        )
+        .copy()
+    )
+    if (
+        not (feed.source_hour_end_utc - feed.source_hour_start_utc)
+        .eq(pd.Timedelta(hours=1))
+        .all()
+    ):
+        raise ValueError("Operational feed requires one-hour source intervals")
+    if any(
+        str(feed[c].dt.tz) != "UTC"
+        for c in ["source_hour_start_utc", "source_hour_end_utc"]
+    ):
+        raise ValueError("Operational feed source timestamps must be UTC")
+    feed["available_at_utc"] = feed.source_hour_end_utc + latency
+    feed["availability_basis"] = "simulated"
+    feed["feed_eligible"] = (
+        feed.coverage_status.eq("complete_for_source_scope")
+        & feed.n_unresolved.eq(0)
+        & feed.reporting_carrier_touchdowns.notna()
+    ).fillna(False)
+    feed["reporting_carrier_touchdowns"] = feed.reporting_carrier_touchdowns.where(
+        feed.feed_eligible
+    )
+    return feed.sort_values(["airport_icao", "source_hour_start_utc"]).reset_index(
+        drop=True
+    )
+
+
+def build_operational_feed(hourly_path=HOURLY, output_dir=None, latency_min=None):
+    hourly_path = Path(hourly_path)
+    source = json.loads(hourly_path.with_suffix(".manifest.json").read_text())
+    if sha256(hourly_path) != source["parquet_sha256"]:
+        raise ValueError("Hourly Parquet hash disagrees with manifest")
+    if latency_min is None:
+        experiment = yaml.safe_load(Path("configs/experiment.yaml").read_text())
+        latency_min = label_timing(experiment.get("label_availability"))[
+            "hourly_latency_min"
+        ]
+    hourly = pd.read_parquet(
+        hourly_path,
+        columns=[
+            "airport_icao",
+            "hour_start_utc",
+            "hour_end_utc",
+            "reporting_carrier_touchdowns",
+            "n_unresolved",
+            "coverage_status",
+            "data_mode",
+        ],
+    )
+    if (
+        len(hourly) != source["rows"]
+        or not hourly.data_mode.eq(source["data_mode"]).all()
+    ):
+        raise ValueError("Hourly rows or data_mode disagree with manifest")
+    feed = operational_feed(hourly, latency_min)
+    path = Path(output_dir or hourly_path.parent) / "operational_feed.parquet"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(".operational_feed.parquet.tmp")
+    feed.to_parquet(tmp, index=False)
+    tmp.replace(path)
+    write_manifest(
+        path,
+        len(feed),
+        {
+            "data_mode": source["data_mode"],
+            "parquet_sha256": source["source_flights_sha256"],
+            "sources": source["sources"],
+        },
+        {
+            "schema_version": "1.0.0",
+            "feed_version": "simulated-operations/1",
+            "source_hourly_sha256": source["parquet_sha256"],
+            "latency_min": latency_min,
+            "availability_basis": "simulated",
+            "eligible_rows": int(feed.feed_eligible.sum()),
+            "consumer_rule": "filter available_at_utc <= prediction as_of_utc and feed_eligible; freshness and feature-use policy belong to the consuming experiment",
+            "publication_note": "Operational replay simulation; historical BTS publication time is unknown",
+        },
+    )
+    print(path, len(feed), "eligible", int(feed.feed_eligible.sum()))
+    return feed
+
+
 DENOMINATOR_KEYS = [
     "cohort_version",
     "task",
@@ -1157,5 +1273,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Reuse verified hourly counts; update the reference only when its policy changes",
     )
+    parser.add_argument("--operational-feed-only", action="store_true")
+    parser.add_argument("--hourly", type=Path, default=HOURLY)
+    parser.add_argument("--feed-latency-min", type=int)
     args = parser.parse_args()
-    build(args.requests, args.output_dir, args.reuse_hourly)
+    if args.operational_feed_only:
+        build_operational_feed(args.hourly, args.output_dir, args.feed_latency_min)
+    else:
+        build(args.requests, args.output_dir, args.reuse_hourly)
