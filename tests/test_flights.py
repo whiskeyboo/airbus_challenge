@@ -562,6 +562,14 @@ def test_requests_and_targets_end_to_end_fixture(tmp_path, monkeypatch):
     hourly, summary = targets.build()
     labels = pd.read_parquet(targets.LABELS)
     assert len(labels) == 108
+    import pyarrow.parquet as pq
+
+    assert set(hourly.data_mode) == {"fixture"}
+    assert set(labels.data_mode) == {"fixture"}
+    assert not pq.read_schema(targets.HOURLY).field("data_mode").nullable
+    assert not pq.read_schema(targets.LABELS).field("data_mode").nullable
+    assert labels.exclusion_reason.isna().eq(labels.eligible).all()
+    assert labels.exclusion_detail.isna().eq(labels.eligible).all()
     assert not labels.duplicated(
         ["prediction_id", "target_kind", "label_version"]
     ).any()
@@ -572,6 +580,15 @@ def test_requests_and_targets_end_to_end_fixture(tmp_path, monkeypatch):
     manifest = json.loads(targets.LABELS.with_suffix(".manifest.json").read_text())
     assert len(manifest["exclusion_audit"]["threshold_sensitivity"]) == 6
     assert manifest["data_mode"] == "fixture"
+    assert sum(r["rows"] for r in manifest["exclusion_counts"]) == len(labels)
+    assert {r["task"] for r in manifest["exclusion_counts"]} == {
+        "throughput",
+        "severe_delay",
+    }
+    assert any(
+        r["exclusion_reason"] is None and r["exclusion_detail"] is None
+        for r in manifest["exclusion_counts"]
+    )
     assert hourly[["airport_icao", "hour_start_utc"]].duplicated().sum() == 0
     assert summary
 
@@ -631,3 +648,156 @@ def test_ineligible_hour_retains_resolved_count_but_null_target():
     assert h.n_unresolved == 1
     assert pd.isna(h.reporting_carrier_touchdowns)
     assert h.exclusion_reason == "unresolved_arrival_fraction_gt_0.05"
+
+
+@pytest.mark.parametrize(
+    "field", ["cancelled", "diverted", "wheels_on_utc", "dep_delay_min"]
+)
+def test_hourly_schedule_counts_ignore_final_outcomes(field):
+    from airbus_challenge.targets import airport_hours
+
+    rows = []
+    for reverse in [False, True]:
+        for i, status in enumerate([{}, {"Cancelled": "1"}, {"Diverted": "1"}]):
+            values = {
+                "Flight_Number_Reporting_Airline": str(123 + i + 3 * reverse),
+                **status,
+            }
+            if reverse:
+                values.update(
+                    Origin="DFW",
+                    Dest="ATL",
+                    CRSArrTime="1330",
+                    WheelsOn="1315",
+                    ArrTime="1325",
+                )
+            rows.append(row(**values))
+    df = outcome_fixture(rows)
+    changed = df.copy()
+    if field in {"cancelled", "diverted"}:
+        changed[field] = ~changed[field]
+    elif field == "wheels_on_utc":
+        changed[field] = pd.Timestamp("2025-01-01T00:00Z")
+    else:
+        changed[field] = 5000.0
+    for icao in CONFIG["airports"]:
+        args = (
+            icao,
+            pd.Timestamp("2023-01-15T14:00Z"),
+            pd.Timestamp("2023-01-15T20:00Z"),
+            "fixture",
+        )
+        before = airport_hours(df, *args, data_mode="fixture")
+        after = airport_hours(changed, *args, data_mode="fixture")
+        columns = [
+            "airport_icao",
+            "hour_start_utc",
+            "scheduled_arrivals",
+            "scheduled_departures",
+        ]
+        pd.testing.assert_frame_equal(before[columns], after[columns])
+        # All three statuses contribute to schedule demand in each direction.
+        assert before.scheduled_arrivals.sum() == 3
+        assert before.scheduled_departures.sum() == 3
+
+
+@pytest.mark.parametrize(
+    ("detail", "reason"),
+    [
+        ("cancelled", "cancelled"),
+        ("timestamp_quarantined", "quarantined"),
+        ("unresolved_arrival_fraction_gt_0.05", "coverage_incomplete"),
+        ("missing_source_month", "coverage_incomplete"),
+        ("unknown_cancellation_status", "missing_outcome"),
+        ("missing_departure_delay", "missing_outcome"),
+    ],
+)
+def test_label_exclusion_contract_mapping(detail, reason):
+    from airbus_challenge.targets import label_exclusions
+
+    labels = label_exclusions(
+        pd.DataFrame(
+            {
+                "prediction_id": ["excluded", "eligible"],
+                "eligible": [False, True],
+                "exclusion_reason": [detail, None],
+            }
+        )
+    )
+    assert labels.exclusion_reason.iloc[0] == reason
+    assert labels.exclusion_detail.iloc[0] == detail
+    assert labels.exclusion_reason.isna().eq(labels.eligible).all()
+    assert labels.exclusion_detail.isna().eq(labels.eligible).all()
+
+
+@pytest.mark.parametrize(
+    ("eligible", "detail", "error"),
+    [
+        (False, "new_unapproved_detail", "Unknown exclusion_detail"),
+        (False, None, "null iff eligible"),
+        (True, "cancelled", "null iff eligible"),
+    ],
+)
+def test_label_exclusion_contract_rejects_invalid_values(eligible, detail, error):
+    from airbus_challenge.targets import label_exclusions
+
+    with pytest.raises(ValueError, match=error):
+        label_exclusions(
+            pd.DataFrame(
+                {
+                    "prediction_id": ["invalid"],
+                    "eligible": [eligible],
+                    "exclusion_reason": [detail],
+                }
+            )
+        )
+
+
+def test_required_data_mode_rejects_unknown_values():
+    from airbus_challenge.targets import airport_hours, label_rows
+
+    df = outcome_fixture([row()])
+    with pytest.raises(ValueError, match="Invalid data_mode"):
+        airport_hours(
+            df,
+            "KATL",
+            pd.Timestamp("2023-01-15T00:00Z"),
+            pd.Timestamp("2023-01-16T00:00Z"),
+            "fixture",
+            data_mode="mixed",
+        )
+    with pytest.raises(ValueError, match="Invalid data_mode"):
+        label_rows(pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), data_mode=None)
+
+
+def test_missing_flight_join_is_an_unapproved_exclusion_detail():
+    from airbus_challenge.requests import flight_requests
+    from airbus_challenge.targets import label_rows
+
+    df = outcome_fixture([row()])
+    requests = flight_requests(
+        df,
+        ["KATL"],
+        [3],
+        pd.Timestamp("2023-01-15T00:00Z"),
+        pd.Timestamp("2023-01-16T00:00Z"),
+        "fixture",
+    )
+    outcomes = df.iloc[:0][
+        ["flight_id", "dep_delay_min", "cancelled", "scheduled_dep_utc"]
+    ]
+    with pytest.raises(ValueError, match="missing_flight_outcome"):
+        label_rows(requests, outcomes, pd.DataFrame(), data_mode="fixture")
+
+
+def test_missing_airport_hour_is_an_unapproved_exclusion_detail():
+    from airbus_challenge.requests import airport_requests
+    from airbus_challenge.targets import airport_hours, label_rows
+
+    start, end = pd.Timestamp("2023-01-15T00:00Z"), pd.Timestamp("2023-01-16T00:00Z")
+    requests = airport_requests(["KATL"], [3], start, end, "fixture", "fixture")
+    hourly = airport_hours(
+        outcome_fixture([row()]), "KDFW", start, end, "fixture", data_mode="fixture"
+    )
+    with pytest.raises(ValueError, match="missing_airport_hour"):
+        label_rows(requests, pd.DataFrame(), hourly, data_mode="fixture")

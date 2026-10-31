@@ -13,7 +13,7 @@ FLIGHTS = Path("data/processed/flights.parquet")
 REQUESTS = Path("data/processed/prediction_requests.parquet")
 HOURLY = Path("data/processed/airport_hourly.parquet")
 LABELS = Path("data/labels/labels.parquet")
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 METRICS = {
     "scheduled_departures": (
         "origin_icao",
@@ -64,6 +64,14 @@ REASONS = {
         "arrival_path_unresolved",
     ),
 }
+EXCLUSION_REASONS = {
+    "cancelled": "cancelled",
+    "timestamp_quarantined": "quarantined",
+    "unresolved_arrival_fraction_gt_0.05": "coverage_incomplete",
+    "missing_source_month": "coverage_incomplete",
+    "unknown_cancellation_status": "missing_outcome",
+    "missing_departure_delay": "missing_outcome",
+}
 LABEL_SCHEMA = pa.schema(
     [
         ("prediction_id", pa.string()),
@@ -71,13 +79,40 @@ LABEL_SCHEMA = pa.schema(
         ("y_true", pa.float64()),
         ("eligible", pa.bool_()),
         ("exclusion_reason", pa.string()),
+        ("exclusion_detail", pa.string()),
         ("outcome_available_at_utc", pa.timestamp("us", tz="UTC")),
         ("availability_basis", pa.string()),
         ("label_source", pa.string()),
         ("label_version", pa.string()),
         ("unit", pa.string()),
+        pa.field("data_mode", pa.string(), nullable=False),
     ]
 )
+
+
+def validate_data_mode(data_mode):
+    if data_mode not in {"real", "fixture"}:
+        raise ValueError(f"Invalid data_mode: {data_mode!r}")
+
+
+def label_exclusions(labels):
+    labels = labels.rename(columns={"exclusion_reason": "exclusion_detail"})
+    unknown = labels.exclusion_detail.notna() & ~labels.exclusion_detail.isin(
+        EXCLUSION_REASONS
+    )
+    if unknown.any():
+        raise ValueError(
+            f"Unknown exclusion_detail: {labels.loc[unknown, ['prediction_id', 'exclusion_detail']].to_dict(orient='records')}"
+        )
+    if (
+        not labels.eligible.notna().all()
+        or not labels.exclusion_detail.isna().eq(labels.eligible).all()
+    ):
+        raise ValueError("exclusion_detail must be null iff eligible")
+    labels["exclusion_reason"] = labels.exclusion_detail.map(EXCLUSION_REASONS).astype(
+        "string"
+    )
+    return labels
 
 
 def invalid_flags(flags, prefixes):
@@ -128,10 +163,12 @@ def uncertain_hours(rows, time, clock, zone, grid):
     return counts
 
 
-def airport_hours(flights, icao, start, end, snapshot, complete=True):
+def airport_hours(flights, icao, start, end, snapshot, complete=True, data_mode="real"):
+    validate_data_mode(data_mode)
     grid = pd.date_range(start, end, freq="h", inclusive="left")
     out = pd.DataFrame({"hour_start_utc": grid})
     out["airport_icao"] = icao
+    out["data_mode"] = pd.Series(data_mode, index=out.index, dtype="string")
     out["hour_end_utc"] = out.hour_start_utc + pd.Timedelta(hours=1)
     out["source_snapshot_id"] = snapshot
     reached = pd.to_numeric(flights.raw_DivReachedDest, errors="coerce").eq(1)
@@ -207,7 +244,8 @@ def airport_hours(flights, icao, start, end, snapshot, complete=True):
     return out
 
 
-def label_rows(requests, outcomes, hourly, threshold=45):
+def label_rows(requests, outcomes, hourly, threshold=45, data_mode="real"):
+    validate_data_mode(data_mode)
     frames = []
     for task, req in requests.groupby("task", sort=False):
         if task == "severe_delay":
@@ -269,7 +307,8 @@ def label_rows(requests, outcomes, hourly, threshold=45):
             frames.append(df)
         else:
             raise ValueError(f"Unknown prediction task: {task}")
-    labels = pd.concat(frames, ignore_index=True)
+    labels = label_exclusions(pd.concat(frames, ignore_index=True))
+    labels["data_mode"] = pd.Series(data_mode, index=labels.index, dtype="string")
     # Final BTS publication times are not evidenced. Event time is not archive availability.
     labels["outcome_available_at_utc"] = pd.Series(
         pd.NaT, index=labels.index, dtype="datetime64[us, UTC]"
@@ -422,6 +461,10 @@ def build():
         raise ValueError("Input Parquet hash disagrees with manifest")
     if request_manifest["source_flights_sha256"] != manifest["parquet_sha256"]:
         raise ValueError("Requests and targets must use the same flight archive")
+    data_mode = manifest["data_mode"]
+    validate_data_mode(data_mode)
+    if request_manifest["data_mode"] != data_mode:
+        raise ValueError("Requests and flights must have the same data_mode")
     start, end = bounds(experiment)
     # Include the two-day lookback for the first issue-time operational baselines.
     start -= pd.Timedelta(days=2)
@@ -449,13 +492,21 @@ def build():
     ]
     flights = pd.read_parquet(FLIGHTS, columns=columns)
     frames = [
-        airport_hours(flights, icao, start, end, manifest["parquet_sha256"])
+        airport_hours(
+            flights, icao, start, end, manifest["parquet_sha256"], data_mode=data_mode
+        )
         for icao in config["airports"]
     ]
     hourly = pd.concat(frames, ignore_index=True)
     HOURLY.parent.mkdir(parents=True, exist_ok=True)
     tmp = HOURLY.with_name(".airport_hourly.parquet.tmp")
-    hourly.to_parquet(tmp, index=False)
+    table = pa.Table.from_pandas(hourly, preserve_index=False)
+    table = table.set_column(
+        table.schema.get_field_index("data_mode"),
+        pa.field("data_mode", pa.string(), nullable=False),
+        pa.array(hourly.data_mode, type=pa.string()),
+    )
+    pq.write_table(table, tmp)
     tmp.replace(HOURLY)
     write_manifest(
         HOURLY,
@@ -504,6 +555,7 @@ def build():
     LABELS.parent.mkdir(parents=True, exist_ok=True)
     tmp = LABELS.with_name(".labels.parquet.tmp")
     summaries = []
+    exclusion_summaries = []
     rows = 0
     with pq.ParquetWriter(tmp, LABEL_SCHEMA) as writer:
         for batch in pq.ParquetFile(REQUESTS).iter_batches(
@@ -514,18 +566,31 @@ def build():
                 "airport_icao",
                 "flight_id",
                 "target_start_utc",
+                "data_mode",
             ],
         ):
+            requests = batch.to_pandas()
+            if not requests.data_mode.eq(data_mode).fillna(False).all():
+                raise ValueError("Requests table data_mode must match its manifest")
             labels = label_rows(
-                batch.to_pandas(),
+                requests,
                 outcomes,
                 hourly,
                 experiment["targets"]["severe_delay_threshold_min"],
+                data_mode=data_mode,
             )
             writer.write_table(
                 pa.Table.from_pandas(labels, schema=LABEL_SCHEMA, preserve_index=False)
             )
             rows += len(labels)
+            tasks = requests.set_index("prediction_id").task
+            exclusion_summaries.append(
+                labels.assign(task=labels.prediction_id.map(tasks))
+                .groupby(["task", "exclusion_reason", "exclusion_detail"], dropna=False)
+                .size()
+                .rename("rows")
+                .reset_index()
+            )
             summaries.append(
                 labels.groupby(["target_kind", "eligible"], dropna=False)
                 .size()
@@ -539,6 +604,20 @@ def build():
         .sum()
         .to_dict(orient="records")
     )
+    exclusion_counts = (
+        pd.concat(exclusion_summaries)
+        .groupby(
+            ["task", "exclusion_reason", "exclusion_detail"],
+            dropna=False,
+            as_index=False,
+        )["rows"]
+        .sum()
+    )
+    exclusion_counts = (
+        exclusion_counts.astype(object)
+        .where(exclusion_counts.notna(), None)
+        .to_dict(orient="records")
+    )
     write_manifest(
         LABELS,
         rows,
@@ -546,6 +625,8 @@ def build():
         {
             "source_requests_sha256": request_manifest["parquet_sha256"],
             "summary": summary,
+            "exclusion_counts": exclusion_counts,
+            "exclusion_reason_mapping": EXCLUSION_REASONS,
             "exclusion_audit": bias,
             "bias_weather_sha256": sha256(
                 Path("data/processed/weather_observations.parquet")
