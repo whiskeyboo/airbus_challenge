@@ -5,13 +5,18 @@ loader does. Every parquet read goes through _read, so a test can check what eac
 Nothing here computes evaluation metrics; the evaluation panel only displays metrics files.
 """
 
+import json
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 import pyarrow as pa
 import pyarrow.dataset as ds
+import pyarrow.parquet as pq
 import yaml
+
+from airbus_challenge import explain
+from airbus_challenge.recommend import TARGET
 
 HOUR = pd.Timedelta(hours=1)
 HORIZONS = (3, 6, 9, 12)
@@ -26,6 +31,14 @@ REQUESTS = "data/processed/prediction_requests.parquet"
 LABELS = "data/labels/labels.parquet"
 ARTIFACTS = "artifacts"
 REPORTS = "reports"
+DRIVERS = "shap_drivers.parquet"  # Per prediction: prediction_id, feature, value, contribution.
+NOT_GENERATED = "not generated yet: run `uv run python -m airbus_challenge.{}`"
+RUN_COLUMNS = ["prediction_id", "task", "airport_icao", "flight_id", "as_of_utc",
+               "target_start_utc", "horizon_h", "target_kind", "estimate", "p10", "p90", "unit",
+               "status", "reason_codes", "model_version", "generated_at_utc"]  # fmt: skip
+REFERENCE_COLUMNS = ["airport_icao", "airport_local_hour", "clear_weather_p95_arrivals_per_hour",
+                     "clear_weather_fit_hours", "clear_weather_reference_id",
+                     "clear_weather_fit_end_utc"]  # fmt: skip
 # Outcome data: only load_replay_outcomes may read these.
 OUTCOME_FILES = {LABELS, "data/processed/flights.parquet"}
 OUTCOME_COLUMNS = {
@@ -273,6 +286,148 @@ def load_advisories(
         path,
         filter=(ds.field("airport_icao") == icao) & (ds.field("as_of_utc") == _ts(t)),
     )
+
+
+def not_generated(module: str) -> str:
+    return NOT_GENERATED.format(module)
+
+
+def load_run_rows(root: Path, run: str, icao: str, t: pd.Timestamp) -> pd.DataFrame:
+    """Every target kind's prediction rows at airport icao and as_of t, for recommend()."""
+    path = root / ARTIFACTS / run / "predictions.parquet"
+    names = set(pq.read_schema(path).names)
+    filter = (ds.field("airport_icao") == icao) & (ds.field("as_of_utc") == _ts(t))
+    return _read(path, [c for c in RUN_COLUMNS if c in names], filter)
+
+
+def _by_preference(models) -> list[str]:
+    return sorted(models, key=lambda m: (m.startswith("baseline"), m))
+
+
+def advisory_models(preds: pd.DataFrame) -> list[str]:
+    """Throughput models in the run, candidates before baselines."""
+    return _by_preference(preds.loc[preds["target_kind"].eq(TARGET), "model_version"].unique())
+
+
+def advisory_rows(preds: pd.DataFrame, throughput_model: str | None = None) -> pd.DataFrame:
+    """One model per target kind, as recommend() requires: the chosen throughput model, else
+    a candidate model before any baseline."""
+    keep = []
+    for kind, g in preds.groupby("target_kind"):
+        models = _by_preference(g["model_version"].unique())
+        pick = throughput_model if kind == TARGET and throughput_model in models else models[0]
+        keep.append(g[g["model_version"].eq(pick)])
+    return pd.concat(keep, ignore_index=True) if keep else preds
+
+
+def load_reference(root: Path) -> pd.DataFrame | None:
+    """Train-only clear-weather ceiling per airport and local hour, as recommend.main reads it."""
+    path = root / HOURLY
+    if not path.exists() or not set(REFERENCE_COLUMNS) <= set(pq.read_schema(path).names):
+        return None
+    ref = _read(path, REFERENCE_COLUMNS)
+    return ref.drop_duplicates(["airport_icao", "airport_local_hour"], ignore_index=True)
+
+
+def component_table(rec: dict) -> pd.DataFrame:
+    """recommend() components as returned, one row each; numbers are shown, not recomputed."""
+    return pd.DataFrame(
+        [
+            {
+                "kind": c["kind"],
+                "level": c["level"],
+                "horizon_h": c.get("horizon_h"),
+                "target_start_utc": (c.get("timestamps") or {}).get("target_start_utc"),
+                "message": c["message"],
+                "reasons": ", ".join(c.get("reasons") or []),
+                "numbers": json.dumps(c.get("numbers") or {}, default=str),
+                "thresholds": json.dumps(c.get("thresholds") or {}),
+            }
+            for c in rec["components"]
+        ]
+    )
+
+
+def load_drivers(root: Path, run: str, prediction_ids, top: int = 5) -> list[dict]:
+    """Per-prediction SHAP drivers if the run wrote them, else []. Global gain importance
+    (feature_importance.csv) is not a per-prediction driver, so it is never passed on."""
+    path = root / ARTIFACTS / run / DRIVERS
+    if not path.exists():
+        return []
+    df = _read(path, filter=ds.field("prediction_id").isin(list(prediction_ids)))
+    df = df.loc[df["contribution"].abs().sort_values(ascending=False).index].head(top)
+    cols = [c for c in ("feature", "value", "contribution", "contribution_scale") if c in df]
+    return df[cols].to_dict("records")
+
+
+def _iso(x) -> str | None:
+    return None if x is None or pd.isna(x) else pd.Timestamp(x).isoformat()
+
+
+def brief_timestamps(t: pd.Timestamp, evidence: dict, preds: pd.DataFrame) -> dict:
+    """Input timestamps the brief must cite, all known at T."""
+    taf = evidence.get("taf")
+    out = {
+        "as_of_utc": _iso(t),
+        "metar_available_at_utc": _iso((evidence.get("metar") or {}).get("available_at_utc")),
+        "taf_available_at_utc": _iso(taf["bulletin"]["available_at_utc"]) if taf else None,
+        "predictions_generated_at_utc": _iso(preds["generated_at_utc"].max())
+        if "generated_at_utc" in preds and len(preds)
+        else None,
+    }
+    return {k: v for k, v in out.items() if v is not None}
+
+
+def make_brief(rec: dict, drivers: list[dict], timestamps: dict, use_llm: bool = False,
+               client=None) -> dict:  # fmt: skip
+    """explain.brief(), but the LLM is only reached when use_llm is set (the user clicked)."""
+    if use_llm or explain.missing(rec, drivers, timestamps):
+        # With missing inputs brief() returns the insufficient_data path before any client.
+        return explain.brief(rec, drivers, timestamps, client=client)
+    return {
+        "text": explain.template(explain.facts(rec, drivers, timestamps)),
+        "path": "template",
+        "reason": ["LLM not requested"],
+    }
+
+
+def list_failure_files(root: Path) -> list[Path]:
+    base = root / REPORTS
+    return sorted(base.rglob("failure_cases*.json")) if base.exists() else []
+
+
+def load_failure_cases(path: Path) -> dict | None:
+    return json.loads(path.read_text()) if path.exists() else None
+
+
+def failure_case_view(case: dict) -> dict:
+    """One failure case as written by failures.py, reshaped for display; nothing computed."""
+    p, o = case["prediction"], case["outcome"]
+    known = case.get("known_at_issue") or {}
+    return {
+        "summary": {
+            "prediction_id": case["prediction_id"],
+            "model": case["model"],
+            "target": case.get("target_label", case["target"]),
+            "airport": case["airport"],
+            "horizon_h": case["horizon"],
+            "as_of_utc": case["as_of_utc"],
+            "target_start_utc": case["target_start_utc"],
+            "estimate": p["estimate"],
+            "p10": p.get("p10"),
+            "p90": p.get("p90"),
+            "unit": p.get("unit"),
+            "outcome": o["y_true"],
+            "error": o["error"],
+            "abs_error": o.get("abs_error"),
+        },
+        "advisory_possible": case.get("advisory_possible"),
+        "advisory_reason": case.get("advisory_reason"),
+        "explanation_status": case.get("explanation_status"),
+        "limitations": [f"{x['code']}: {x['text']}" for x in case.get("limitations", [])],
+        "source_ages_min": known.get("source_ages_min") or {},
+        "sources": pd.DataFrame(known.get("sources") or []),
+    }
 
 
 # What actually happened (hindsight only) ----------------------------------------------------

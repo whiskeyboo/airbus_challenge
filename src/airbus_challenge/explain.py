@@ -65,7 +65,7 @@ def facts(recommendation: dict, drivers: list[dict], timestamps: dict) -> dict:
         "airport_icao": recommendation["airport_icao"],
         "as_of_utc": recommendation["as_of_utc"],
         "level": recommendation["level"],
-        "threshold_label": THRESHOLD_LABEL,
+        "threshold_label": recommendation.get("threshold_label", THRESHOLD_LABEL),
         "severe_delay_threshold_min": EXPERIMENT["targets"][
             "severe_delay_threshold_min"
         ],

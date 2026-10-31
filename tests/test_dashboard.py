@@ -1,3 +1,4 @@
+import json
 import shutil
 from pathlib import Path
 
@@ -8,6 +9,7 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 from airbus_challenge import dashboard_data as dd
+from airbus_challenge import explain, recommend
 
 REPO = Path(__file__).resolve().parents[1]
 APP = REPO / "app/dashboard.py"
@@ -240,6 +242,120 @@ def test_departure_outcomes_exclude_cancelled_flights_from_the_share(root):
     assert len(out["hourly"]) == 13
 
 
+# Product outputs: advisories, brief, failure cases -------------------------------------------
+
+
+def test_advisory_from_saved_rows_abstains_without_reference_and_reads_saved_table(root):
+    rows = dd.load_run_rows(root, "fixture_run", "KDFW", T)
+    assert dd.advisory_models(rows) == ["baseline_persistence_v1"]
+    rec = recommend.recommend(dd.advisory_rows(rows), dd.load_reference(root))
+    assert rec["level"] == "abstain" and rec["threshold_label"] == "provisional_until_WP-D7"
+    comps = dd.component_table(rec)
+    six = comps[comps.horizon_h.eq(6)].iloc[0]
+    assert six.level == "abstain" and "source_hour_incomplete" in six.reasons
+    assert comps[comps.kind.eq("severe_delay")].iloc[0].reasons == "no_prediction_rows"
+    assert rec["cancellation"] is None
+    recommend.advisories([rec]).to_parquet(root / dd.ARTIFACTS / "fixture_run/advisories.parquet")
+    saved = dd.load_advisories(root, "fixture_run", "KDFW", T)
+    assert len(saved) == len(comps) and set(saved.threshold_label) == {"provisional_until_WP-D7"}
+
+
+def test_advisory_rows_keep_one_model_per_kind_candidate_first():
+    preds = pd.DataFrame(
+        {
+            "target_kind": ["reporting_carrier_touchdowns"] * 3 + ["cancellation"] * 2,
+            "model_version": ["baseline_persistence_v1", "candidate_v1", "baseline_clim_v1",
+                              "baseline_canc_v1", "canc_v1"],
+        }
+    )  # fmt: skip
+    assert dd.advisory_models(preds) == ["candidate_v1", "baseline_clim_v1", "baseline_persistence_v1"]  # fmt: skip
+    picked = dd.advisory_rows(preds).groupby("target_kind").model_version.unique()
+    assert picked.map(list).to_dict() == {
+        "cancellation": ["canc_v1"],
+        "reporting_carrier_touchdowns": ["candidate_v1"],
+    }
+    chosen = dd.advisory_rows(preds, "baseline_persistence_v1")
+    assert set(chosen.model_version) == {"baseline_persistence_v1", "canc_v1"}
+
+
+REC = {
+    "airport_icao": "KDFW", "as_of_utc": T.isoformat(), "level": "normal",
+    "threshold_label": "provisional_until_WP-D7", "cancellation": None,
+    "components": [{"kind": "throughput", "level": "normal", "message": "ok", "reasons": [],
+                    "horizon_h": 3, "unit": "touchdowns/hour",
+                    "timestamps": {"target_start_utc": "2024-05-27T21:00:00+00:00"},
+                    "numbers": {"estimate": 50.0, "p10": 45.0, "p90": 55.0,
+                                "clear_weather_p95": 52.0, "ratio_estimate": 0.96}}],
+}  # fmt: skip
+DRIVERS = [{"feature": "metar_crosswind_kt", "value": 18.0, "contribution": -3.1,
+            "contribution_scale": "touchdowns/hour"}]  # fmt: skip
+
+
+@pytest.fixture
+def no_key(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(explain, "load_dotenv", lambda: None)
+    monkeypatch.setattr(explain, "OpenAI", lambda **_: pytest.fail("no network calls"))
+
+
+def test_brief_path_template_by_default_and_insufficient_data_without_drivers(no_key, root):
+    stamps = {"as_of_utc": T.isoformat()}
+    assert dd.load_drivers(root, "fixture_run", ["p3"]) == []
+    out = dd.make_brief(REC, DRIVERS, stamps)
+    assert out["path"] == "template" and out["reason"] == ["LLM not requested"]
+    assert "metar_crosswind_kt" in out["text"]
+    out = dd.make_brief(REC, [], stamps)
+    assert out["path"] == "insufficient_data" and "no SHAP drivers" in out["reason"]
+    out = dd.make_brief(REC, DRIVERS, stamps, use_llm=True)  # Clicked, but no key.
+    assert out["path"] == "template" and out["reason"] == ["no OPENAI_API_KEY"]
+
+
+def test_drivers_and_brief_timestamps_from_run_artifacts(root):
+    pd.DataFrame(
+        {"prediction_id": ["p3", "p3", "p9"], "feature": ["a", "b", "c"],
+         "value": [1.0, 2.0, 3.0], "contribution": [0.1, -0.5, 9.0],
+         "contribution_scale": "touchdowns/hour"}
+    ).to_parquet(root / dd.ARTIFACTS / "fixture_run" / dd.DRIVERS)  # fmt: skip
+    assert [d["feature"] for d in dd.load_drivers(root, "fixture_run", ["p3"])] == ["b", "a"]
+    ev = dd.load_evidence(root, "KDFW", T)
+    stamps = dd.brief_timestamps(T, ev, dd.load_run_rows(root, "fixture_run", "KDFW", T))
+    assert stamps == {
+        "as_of_utc": "2024-05-27T18:00:00+00:00",
+        "metar_available_at_utc": "2024-05-27T17:03:00+00:00",
+        "taf_available_at_utc": "2024-05-27T17:41:00+00:00",
+        "predictions_generated_at_utc": "2024-05-27T18:00:00+00:00",
+    }
+
+
+def test_failure_cases_present_and_missing(root):
+    assert dd.list_failure_files(root) == []
+    assert dd.load_failure_cases(root / "reports/failure_cases_dev.json") is None
+    case = {
+        "prediction_id": "p1", "model": "candidate_v1", "target": "reporting_carrier_touchdowns",
+        "target_label": "arrival throughput (AAR proxy)", "airport": "KATL", "horizon": 12,
+        "as_of_utc": "2024-03-05T03:00:00Z", "target_start_utc": "2024-03-05T15:00:00Z",
+        "prediction": {"estimate": 50.0, "p10": 45.0, "p90": 55.0, "unit": "touchdowns/hour"},
+        "outcome": {"y_true": 30.0, "error": 20.0, "abs_error": 20.0},
+        "explanation_status": "ok", "advisory_possible": False,
+        "advisory_reason": "no adverse weather feature or wide interval at T: nothing to act on",
+        "limitations": [{"code": "outside_interval", "text": "outcome outside the p10-p90 interval"}],
+        "known_at_issue": {"source_ages_min": {"metar_age_min": 20.0, "taf_age_min": None},
+                           "sources": [{"feature_group": "taf", "source_ref": "B#00",
+                                        "available_at_utc": "2024-03-05T02:41:00Z", "age_min": 19.0}]},
+    }  # fmt: skip
+    path = root / "reports/fixture/failure_cases_dev.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"run_id": "failures-x", "cases": [case]}))
+    assert dd.list_failure_files(root) == [path]
+    v = dd.failure_case_view(dd.load_failure_cases(path)["cases"][0])
+    assert (v["summary"]["estimate"], v["summary"]["outcome"], v["summary"]["error"]) == (50.0, 30.0, 20.0)
+    assert v["advisory_possible"] is False and v["advisory_reason"].startswith("no adverse")
+    assert v["limitations"] == ["outside_interval: outcome outside the p10-p90 interval"]
+    assert v["source_ages_min"]["metar_age_min"] == 20.0 and v["sources"].age_min.tolist() == [19.0]
+    empty = dd.failure_case_view(case | {"known_at_issue": None})
+    assert empty["sources"].empty and empty["source_ages_min"] == {}
+
+
 # (c) forecast and evidence loaders never read outcomes; (d) only the replay loader does --------
 
 
@@ -266,6 +382,8 @@ def test_forecast_and_evidence_loaders_read_no_outcome_file_or_column(
         dd.load_schedule(root, "KDFW", T),
     )
     dd.load_advisories(root, "fixture_run", "KDFW", T)
+    dd.load_run_rows(root, "fixture_run", "KDFW", T)
+    dd.load_reference(root)
     assert reads, "loaders must read through _read"
     for path, cols in reads:
         assert path.relative_to(root).as_posix() not in dd.OUTCOME_FILES | {dd.REQUESTS}

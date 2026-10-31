@@ -36,9 +36,14 @@ from airbus_challenge.baselines import (
     split_bounds,
 )
 from airbus_challenge.download import sha256
+from airbus_challenge.slices import OUTPUT, PROCESSED, SLICE_COLUMNS
 
 LABELS = Path("data/labels/labels.parquet")
 REPORTS = Path("reports")
+# Realised target-hour weather, in hindsight: read after labels, never a predictor.
+SLICES = PROCESSED / OUTPUT
+SLICE_KEY = ["airport_icao", "hour_start_utc"]
+WEATHER_FLAGS = [c for c in SLICE_COLUMNS if c not in ("n_metars", "source_record_ids")]
 CONFIGS = [Path("configs/airports.yaml"), Path("configs/experiment.yaml")]
 
 SEVERE = EXPERIMENT["targets"]["severe_delay"]
@@ -50,6 +55,7 @@ TARGET_LABELS = {
     SEVERE: "severe departure delay (>45 min, operated flights)",
 }
 PERSISTENCE = "baseline_persistence_v1"
+SEASONAL = "baseline_seasonal_persistence_v1"
 CLIMATOLOGY = "baseline_climatology_v1"
 CONDITIONAL_RATE = "baseline_conditional_rate_v1"
 LOGISTIC = "baseline_logistic_v1"
@@ -91,6 +97,9 @@ METRIC_DEFINITIONS = {
     "baseline_support": "rows the model and both required baselines all scored; "
     "skill is measured only here",
     "operational_day": "24 h from 08:00 UTC, near the overnight traffic trough",
+    "weather_slices": "weather:<flag>, weather:not_<flag> and weather:<flag>_unknown "
+    "(no METAR in the hour) from eval_weather_slices, joined on airport and "
+    "floor(target_start_utc, 1 h); common-support rows, all horizons together",
 }
 
 SPLITS = ("validation", "calibration", "test")
@@ -132,6 +141,13 @@ def required_baselines(target: str) -> tuple[str, str]:
     return (
         (CONDITIONAL_RATE, LOGISTIC) if target in BINARY else (PERSISTENCE, CLIMATOLOGY)
     )
+
+
+def skill_baselines(target: str) -> tuple[str, ...]:
+    # Seasonal persistence is not required, but the write-up leads with it
+    # because ordinary persistence is weak at 3-12 h.
+    required = required_baselines(target)
+    return required if target in BINARY else (*required, SEASONAL)
 
 
 def is_baseline(models: pd.Series) -> pd.Series:
@@ -617,14 +633,14 @@ def squared_errors(scored: pd.DataFrame) -> pd.DataFrame:
 def baseline_support(squared: pd.DataFrame, model: str, target: str) -> pd.DataFrame:
     if model not in squared:
         return squared.iloc[:0]
-    columns = dict.fromkeys([model, *required_baselines(target)])
+    columns = dict.fromkeys([model, *skill_baselines(target)])
     return squared[[c for c in columns if c in squared]].dropna()
 
 
 def skill_metrics(
     support: pd.DataFrame, days: pd.Series, model: str, target: str
 ) -> list[dict]:
-    baselines = [b for b in required_baselines(target) if b != model]
+    baselines = [b for b in skill_baselines(target) if b != model]
     if support.empty:
         names = {f"skill_vs_{b}": "share" for b in baselines}
         return null_metrics(names, "no_predicted_rows")
@@ -788,6 +804,97 @@ def empty_slice_records(
             records += _rows(
                 identity, place, model, basis, "own_support", metrics, counts
             )
+    return records
+
+
+def load_slices(path: Path, joined: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    hours = joined["target_start_utc"].dt.floor("h")
+    table = pd.read_parquet(
+        path,
+        columns=[*SLICE_KEY, *WEATHER_FLAGS, "slice_version"],
+        filters=[
+            ("hour_start_utc", ">=", hours.min()),
+            ("hour_start_utc", "<=", hours.max()),
+        ],
+    )
+    if table.duplicated(SLICE_KEY).any():
+        raise ValueError("weather slices hold more than one row per airport-hour")
+    info = {
+        "path": str(path),
+        "slice_version": sorted(table["slice_version"].unique()),
+        "flags": WEATHER_FLAGS,
+        "use": "evaluation only, realised target-hour weather; never a predictor",
+    }
+    return table.drop(columns="slice_version"), info
+
+
+def weather_names(joined: pd.DataFrame, table: pd.DataFrame) -> pd.DataFrame:
+    # Built beside the scored rows, never merged into them.
+    keys = pd.DataFrame(
+        {
+            "airport_icao": joined["airport_icao"].to_numpy(),
+            "hour_start_utc": joined["target_start_utc"]
+            .dt.floor("h")
+            .astype(table["hour_start_utc"].dtype)
+            .to_numpy(),
+        }
+    )
+    weather = keys.merge(table, on=SLICE_KEY, how="left", validate="m:1")
+    names = pd.DataFrame(index=joined.index)
+    for flag in WEATHER_FLAGS:
+        value = weather[flag].astype("boolean")
+        names[flag] = np.where(
+            value.isna(),
+            f"weather:{flag}_unknown",
+            np.where(value.fillna(False), f"weather:{flag}", f"weather:not_{flag}"),
+        )
+    return names
+
+
+def weather_slice_records(
+    joined: pd.DataFrame, weather: pd.DataFrame, basis: dict[str, list[str]]
+) -> list[dict]:
+    records = []
+    for _, frame in joined.groupby(SCOPE):
+        target = frame["target_kind"].iloc[0]
+        binary = target in BINARY
+        identity = {
+            "split": frame["split"].iloc[0],
+            "cohort": frame["cohort_version"].iloc[0],
+            "task": frame["task"].iloc[0],
+            "target": target,
+            "target_label": TARGET_LABELS.get(target, target),
+        }
+        empty = null_metrics(
+            metric_units(binary, frame["unit"].iloc[0]), "no_predicted_rows"
+        )
+        models = sorted(frame["model_version"].unique())
+        for airport in [*sorted(frame["airport_icao"].unique()), POOLED]:
+            cell = frame
+            if airport != POOLED:
+                cell = cell[cell["airport_icao"].eq(airport)]
+            common = common_rows(cell[cell["scored"]])
+            place = {"airport": airport, "horizon": ALL_HORIZONS}
+            for flag in WEATHER_FLAGS:
+                names = weather.loc[cell.index, flag]
+                for name in sorted(names.unique()):
+                    in_cell = names.eq(name)
+                    in_common = weather.loc[common.index, flag].eq(name)
+                    for model in models:
+                        own = cell[cell["model_version"].eq(model) & in_cell]
+                        rows = common[common["model_version"].eq(model) & in_common]
+                        if rows.empty:
+                            metrics = list(empty)
+                        elif binary:
+                            metrics = classification_metrics(rows)
+                        else:
+                            metrics = regression_metrics(rows)
+                        counts = _cell_counts(own, rows, binary)
+                        if target == SEVERE:
+                            metrics.append(cancellation_rate(counts))
+                        records += _rows(
+                            identity, place, model, basis, name, metrics, counts
+                        )
     return records
 
 
@@ -1093,8 +1200,10 @@ def main(
     approved_by: str | None = None,
     experiment: str = "primary",
     cohorts: list[str] | None = None,
+    slices_path: Path | None = None,
 ) -> Path:
     labels_path, requests_path = labels_path or LABELS, requests_path or REQUESTS
+    slices_path = slices_path or SLICES
     artifacts, reports = artifacts or ARTIFACTS, reports or REPORTS
     ledger, mirror = ledger or LEDGER, mirror or LEDGER_MIRROR
     if locked_test:
@@ -1104,12 +1213,16 @@ def main(
             reports=(reports, REPORTS),
             ledger=(ledger, LEDGER),
             mirror=(mirror, LEDGER_MIRROR),
+            slices=(slices_path, SLICES),
         )
     if experiment not in LOCKED_EXPERIMENTS:
         raise ValueError(f"experiment outside {LOCKED_EXPERIMENTS}")
     # Hashed before the read, because worktrees share data/.
     sources = [artifacts / r / "predictions.parquet" for r in runs]
     data_sha256 = {str(p): sha256(p) for p in [*sources, labels_path, requests_path]}
+    use_slices = slices_path.exists()
+    if use_slices:
+        data_sha256[str(slices_path)] = sha256(slices_path)
     predictions = load_predictions(artifacts, runs, locked_test, cohorts)
     manifests = read_manifests(artifacts, runs)
     check_requests_hash(manifests, data_sha256[str(requests_path)])
@@ -1167,6 +1280,12 @@ def main(
         records += evaluate_target(frame, basis)
     records += macro_records(records)
     records += empty_slice_records(scope, predictions, basis)
+    weather_slices, weather_reason = None, "slices_file_missing"
+    if use_slices:
+        table, weather_slices = load_slices(slices_path, joined)
+        weather = weather_names(joined, table)
+        records += weather_slice_records(joined, weather, basis)
+        weather_reason = None
     bins = reliability(joined)
     splits = sorted(joined["split"].unique())
     report = {
@@ -1198,6 +1317,8 @@ def main(
         "metrics": records,
         "reliability": bins,
         "worst_misses": worst_misses(joined),
+        "weather_slices": weather_slices,
+        "weather_slices_reason": weather_reason,
     }
     figures.mkdir(parents=True, exist_ok=True)
     for split, cohort, target in joined[SCOPE].drop_duplicates().to_numpy():

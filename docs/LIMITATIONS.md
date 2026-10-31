@@ -1,6 +1,6 @@
 # Limitations: where this fails, and how the user would know
 
-Status at commit `908c1d9`. Decision IDs refer to [DECISIONS.md](DECISIONS.md); gates to [PHASE_PLAN.md](PHASE_PLAN.md).
+Status at commit `33e8faf`, plus the first real development run (2026-10-31; dev splits only, no 2025 outcomes). Decision IDs refer to [DECISIONS.md](DECISIONS.md); gates to [PHASE_PLAN.md](PHASE_PLAN.md).
 
 ## Target meaning
 - **There is no true AAR.** The target is arrival throughput (AAR proxy): BTS reporting-carrier wheels-on per UTC hour (O01). It reflects demand as well as capacity, so a quiet hour that is not a capacity cut still scores low. Non-reporting carriers (most cargo, GA) are absent.
@@ -22,6 +22,16 @@ Status at commit `908c1d9`. Decision IDs refer to [DECISIONS.md](DECISIONS.md); 
 
 ## Severe delay
 - The probability means departure delay > 45 min **given that the flight operates**. Cancelled flights are excluded, not counted as negatives, and the cancellation rate is reported separately (P06). It is not a probability over all scheduled flights.
+
+## What the first real development run showed
+Numbers below come from producer output (`train.py`, `calibrate.py`) on 2023/2024 data, not yet from the evaluator report with confidence intervals.
+- **Severe delay cannot support flight-level alerts.** On calibration rows (H2 2024; validation was used for early stopping, so it is partly in-sample), PR-AUC is 0.234 at KATL (prevalence 8.9%) and 0.214 at KDFW (12.0%): roughly 2x better than chance at ranking. Brier is only about 4-6% better than predicting the base rate. Recall at 50% precision is about 0.
+- **WP-D7 therefore sets no alerts where the evidence is missing.** On Oct-Dec 2024 (not used for fitting), no "act" threshold reaches 50% precision at either airport, and no "watch" threshold reaches 30% at KATL. KDFW "watch" (calibrated p >= 0.11) has 30% precision and 6.8% recall at about 74 flagged flights a day. `recommend.py` never alerts on a null threshold; the user sees the abstention reason `precision_target_not_reached`.
+- **Throughput "act" alerts mostly flag quiet hours.** On Oct-Dec 2024 the WP-D7 rule (widened p10 below 70% of the clear-weather ceiling) met its 50% precision target (61%) but fired on 9,851 of about 17,700 rows, about 56% of hours. Low-demand hours sit far below the ceiling, so the alert largely measures demand, not a capacity cut. Next step: compare against scheduled arrivals in busy hours instead.
+- **Arrival throughput (AAR proxy) is learned mostly from the schedule.** The top LightGBM gains are scheduled arrivals/departures around the target hour; weather features (TAF ceiling, freezing precipitation) rank lower. Whether weather adds skill is answered by the comparison with `baseline_schedule_v1` and the thunderstorm/IFR slices, not by importance.
+- **Bad-weather hours are rare.** Thunderstorms occur in about 2% of target hours (KATL 1.8%, KDFW 2.0%), IFR in 9.0% / 5.6%, strong crosswind in 0.1-0.2%. Slice metrics for these hours have wide intervals; strong crosswind is close to anecdotal.
+- **Persistence has gaps.** Persistence and seasonal persistence are `unavailable` on 128 of 70,212 throughput rows, where the source hour was excluded or empty.
+- `train.py` marks 452 throughput rows `degraded` without a validated fallback (contract §8); the trigger needs confirming with its owner.
 
 ## Baselines
 - Ordinary persistence is weak 3–12 h ahead. Validation RMSE (touchdowns/hour) for climatology / seasonal persistence / schedule-only / persistence:

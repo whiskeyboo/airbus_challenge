@@ -1,8 +1,10 @@
 """Code-only alert rules. No LLM: every level, number and threshold here comes from code."""
 
 import argparse
+import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from airbus_challenge.baselines import (
@@ -33,6 +35,9 @@ THRESHOLDS = {
     "severe_delay_probability_watch": 0.20,  # any flight strictly above -> watch
     "severe_delay_probability_act": 0.35,  # any flight strictly above -> act
 }
+POLICY_VERSION = "wp-d7-v1"
+REFERENCE_COLUMNS = ["airport_icao", "airport_local_hour", "clear_weather_p95_arrivals_per_hour",
+                     "clear_weather_fit_hours", "clear_weather_reference_id", "clear_weather_fit_end_utc"]  # fmt: skip
 RANK = {"normal": 0, "abstain": 1, "watch": 2, "act": 3}
 MESSAGES = {
     "throughput.normal": f"{TARGET_LABEL} near the clear-weather ceiling.",
@@ -48,6 +53,28 @@ MESSAGES = {
     "overall.act": "Act: at least one rule crossed a provisional act threshold.",
     "overall.abstain": "Abstain: some inputs are missing, so no all-clear is given.",
 }
+
+
+def apply_calibrator(cal: dict, p) -> np.ndarray:
+    """Isotonic breakpoints from calibrate.py; linear between, clipped outside."""
+    return np.interp(np.asarray(p, dtype=float), cal["x"], cal["y"])
+
+
+def load_policy(run_dir: Path) -> dict:
+    """WP-D7 policy from the run's calibration.json when present, else the provisional constants."""
+    path = Path(run_dir) / "calibration.json"
+    if not path.exists():
+        return THRESHOLDS
+    cal = json.loads(path.read_text())
+    if cal["policy_version"] != POLICY_VERSION:
+        raise ValueError(
+            f"{path}: expected {POLICY_VERSION}, got {cal['policy_version']}"
+        )
+    return {"label": POLICY_VERSION, "source": str(path), "calibration": cal}
+
+
+def _overall_message(level: str, policy: dict) -> str:
+    return MESSAGES[f"overall.{level}"].replace("provisional", policy["label"])
 
 
 def _iso(t) -> str | None:
@@ -102,8 +129,32 @@ def _ceiling(icao: str, target_start, reference: pd.DataFrame | None) -> dict | 
     }
 
 
-def throughput(row: pd.Series, reference: pd.DataFrame | None) -> dict:
-    t = THRESHOLDS
+def _throughput_rule(row: pd.Series, policy: dict) -> dict:
+    """Ratios and p10 margin; under WP-D7, act on the widened p10 and watch on the estimate."""
+    if "calibration" not in policy:
+        keys = (
+            "throughput_ratio_watch",
+            "throughput_ratio_act",
+            "min_reference_fit_hours",
+        )
+        return {k: policy[k] for k in keys} | {"p10_margin": 0.0, "act_on": "estimate"}
+    cal, model = policy["calibration"], row["model_version"]
+    alert = cal["throughput_alert"].get(model) or {
+        "act_ratio": None,
+        "watch_ratio": 0.85,
+    }
+    margins = cal["throughput_interval"].get(model) or {}
+    margin = (margins.get(row["airport_icao"]) or {}).get("margin")
+    return {"throughput_ratio_watch": alert["watch_ratio"],
+            "throughput_ratio_act": None if margin is None else alert["act_ratio"],
+            "min_reference_fit_hours": THRESHOLDS["min_reference_fit_hours"],
+            "p10_margin": margin, "act_on": "widened_p10"}  # fmt: skip
+
+
+def throughput(
+    row: pd.Series, reference: pd.DataFrame | None, policy: dict = THRESHOLDS
+) -> dict:
+    t = _throughput_rule(row, policy)
     ceiling = _ceiling(row["airport_icao"], row["target_start_utc"], reference)
     common = {
         "label": TARGET_LABEL,
@@ -118,14 +169,7 @@ def throughput(row: pd.Series, reference: pd.DataFrame | None) -> dict:
             "clear_weather_fit_end_utc": ceiling
             and ceiling["clear_weather_fit_end_utc"],
         },
-        "thresholds": {
-            k: t[k]
-            for k in (
-                "throughput_ratio_watch",
-                "throughput_ratio_act",
-                "min_reference_fit_hours",
-            )
-        },
+        "thresholds": t | {"label": policy["label"]},
         "reference": ceiling,
     }
     reasons = list(
@@ -149,14 +193,18 @@ def throughput(row: pd.Series, reference: pd.DataFrame | None) -> dict:
                           numbers={"estimate": _num(row["estimate"])}, **common)  # fmt: skip
     ratio = row["estimate"] / p95
     ratio_p10 = None if pd.isna(row["p10"]) else row["p10"] / p95
-    if ratio < t["throughput_ratio_act"]:
-        level = "act"
-    elif ratio < t["throughput_ratio_watch"] or (
-        ratio_p10 is not None and ratio_p10 < t["throughput_ratio_act"]
-    ):
-        level = "watch"
+    act = t["throughput_ratio_act"]  # None never alerts
+    p10w = None
+    if t["act_on"] == "widened_p10":
+        p10w = None if pd.isna(row["p10"]) else row["p10"] - t["p10_margin"]
+        act_hit = act is not None and p10w is not None and p10w / p95 < act
+        watch_hit = ratio < t["throughput_ratio_watch"]
     else:
-        level = "normal"
+        act_hit = ratio < act
+        watch_hit = ratio < t["throughput_ratio_watch"] or (
+            ratio_p10 is not None and ratio_p10 < act
+        )
+    level = "act" if act_hit else "watch" if watch_hit else "normal"
     numbers = {
         "estimate": _num(row["estimate"]),
         "p10": _num(row["p10"]),
@@ -164,6 +212,7 @@ def throughput(row: pd.Series, reference: pd.DataFrame | None) -> dict:
         "clear_weather_p95": p95,
         "ratio_estimate": float(ratio),
         "ratio_p10": None if ratio_p10 is None else float(ratio_p10),
+        "p10_widened": _num(p10w),
     }
     if row["status"] == "degraded":
         reasons.append("degraded_prediction")
@@ -196,13 +245,57 @@ def _flight_times(rows: pd.DataFrame) -> dict:
     }
 
 
-def severe_delay(rows: pd.DataFrame) -> dict:
-    t = THRESHOLDS
+def _severe_rule(rows: pd.DataFrame, policy: dict) -> tuple[dict | None, dict]:
+    """(calibrator, thresholds). Provisional: strictly above. WP-D7: calibrated p >= threshold."""
+    if "calibration" not in policy:
+        keys = ("severe_delay_probability_watch", "severe_delay_probability_act")
+        return None, {k: policy[k] for k in keys} | {
+            "comparison": "gt",
+            "label": policy["label"],
+        }
+    cal, model, icao = (
+        policy["calibration"],
+        _model(rows, SEVERE),
+        rows["airport_icao"].iloc[0],
+    )
+    calibrator = (cal["calibrators"].get(SEVERE) or {}).get(model)
+    by_level = cal["severe_delay_thresholds"].get(model) or {}
+    pick = lambda lvl: (by_level.get(lvl) or {}).get(icao) or {}
+    return calibrator, {
+        "severe_delay_probability_watch": pick("watch").get("threshold"),
+        "severe_delay_probability_act": pick("act").get("threshold"),
+        "pooled": {lvl: pick(lvl).get("pooled") for lvl in ("watch", "act")},
+        "comparison": "ge", "label": policy["label"], "source": policy["source"],
+    }  # fmt: skip
+
+
+def _above(p: pd.Series, threshold, comparison: str) -> int:
+    if threshold is None:
+        return 0  # null threshold never alerts
+    return int((p.ge(threshold) if comparison == "ge" else p.gt(threshold)).sum())
+
+
+def severe_delay(rows: pd.DataFrame, policy: dict = THRESHOLDS) -> dict:
+    calibrator, t = _severe_rule(rows, policy)
     scored, numbers = _flights(rows, SEVERE)
+    uncalibrated = "calibration" in policy and calibrator is None
+    if calibrator is not None:
+        scored = scored.assign(
+            estimate=apply_calibrator(calibrator, scored["estimate"])
+        )
+        numbers["calibrated"] = True
+        numbers["max_probability"] = (
+            _num(scored["estimate"].max()) if len(scored) else None
+        )
+        numbers["mean_probability"] = (
+            _num(scored["estimate"].mean()) if len(scored) else None
+        )
     p = scored["estimate"]
     numbers |= {
-        "n_above_watch": int(p.gt(t["severe_delay_probability_watch"]).sum()),
-        "n_above_act": int(p.gt(t["severe_delay_probability_act"]).sum()),
+        "n_above_watch": _above(
+            p, t["severe_delay_probability_watch"], t["comparison"]
+        ),
+        "n_above_act": _above(p, t["severe_delay_probability_act"], t["comparison"]),
         "top_flights": [
             {
                 "flight_id": r.flight_id,
@@ -217,14 +310,23 @@ def severe_delay(rows: pd.DataFrame) -> dict:
         "label": SEVERE_LABEL,
         "model_version": _model(rows, SEVERE),
         "timestamps": _flight_times(rows),
-        "thresholds": {
-            k: t[k]
-            for k in ("severe_delay_probability_watch", "severe_delay_probability_act")
-        },
+        "thresholds": t,
         "numbers": numbers,
         "reasons": reasons,
     }
     if scored.empty:
+        return _component("severe_delay", "abstain", **common)
+    no_rule = (
+        t["severe_delay_probability_watch"] is None
+        and t["severe_delay_probability_act"] is None
+    )
+    if uncalibrated or no_rule:
+        why = (
+            "no_wp_d7_calibration_for_model"
+            if uncalibrated
+            else "no_threshold_meets_precision"
+        )
+        common["reasons"] = reasons + [why]
         return _component("severe_delay", "abstain", **common)
     level = (
         "act"
@@ -249,7 +351,11 @@ def cancellation(rows: pd.DataFrame) -> dict:
     }
 
 
-def recommend(predictions: pd.DataFrame, reference: pd.DataFrame | None = None) -> dict:
+def recommend(
+    predictions: pd.DataFrame,
+    reference: pd.DataFrame | None = None,
+    policy: dict = THRESHOLDS,
+) -> dict:
     """Rows for one airport and issue time; reference = train-only clear-weather table."""
     icaos, issues = (
         predictions["airport_icao"].unique(),
@@ -271,12 +377,12 @@ def recommend(predictions: pd.DataFrame, reference: pd.DataFrame | None = None) 
     else:
         _model(tp, TARGET)
         components += [
-            throughput(r, reference)
+            throughput(r, reference, policy)
             for _, r in tp.sort_values("target_start_utc").iterrows()
         ]
     sd = by_kind.get(SEVERE)
     components.append(
-        severe_delay(sd) if sd is not None
+        severe_delay(sd, policy) if sd is not None
         else _component("severe_delay", "abstain", reasons=["no_prediction_rows"], numbers={})
     )  # fmt: skip
     level = max((c["level"] for c in components), key=RANK.get)
@@ -286,9 +392,10 @@ def recommend(predictions: pd.DataFrame, reference: pd.DataFrame | None = None) 
         "as_of_utc": _iso(issues[0]),
         "level": level,
         "message_key": f"overall.{level}",
-        "message": MESSAGES[f"overall.{level}"],
-        "threshold_label": THRESHOLD_LABEL,
-        "thresholds": THRESHOLDS,
+        "message": _overall_message(level, policy),
+        "threshold_label": policy["label"],
+        "threshold_source": policy["source"],
+        "thresholds": {k: v for k, v in policy.items() if k != "calibration"},
         "components": components,
         "cancellation": cancellation(by_kind[CANCELLATION])
         if CANCELLATION in by_kind
@@ -325,13 +432,14 @@ def main() -> None:
     args = parser.parse_args()
     run = ARTIFACTS / args.run
     preds = pd.read_parquet(run / "predictions.parquet")
-    ref_cols = ["airport_icao", "airport_local_hour", "clear_weather_p95_arrivals_per_hour",
-                "clear_weather_fit_hours", "clear_weather_reference_id", "clear_weather_fit_end_utc"]  # fmt: skip
-    reference = pd.read_parquet(Path(HOURLY), columns=ref_cols).drop_duplicates(
-        ["airport_icao", "airport_local_hour"]
-    )
+    reference = pd.read_parquet(
+        Path(HOURLY), columns=REFERENCE_COLUMNS
+    ).drop_duplicates(["airport_icao", "airport_local_hour"])
+    policy = load_policy(run)
+    print(f"thresholds: {policy['label']} ({policy['source']})")
     recs = [
-        recommend(g, reference) for _, g in preds.groupby(["airport_icao", "as_of_utc"])
+        recommend(g, reference, policy)
+        for _, g in preds.groupby(["airport_icao", "as_of_utc"])
     ]
     out = advisories(recs)
     out.to_parquet(run / "advisories.parquet", index=False)
