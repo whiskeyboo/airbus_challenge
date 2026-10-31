@@ -15,7 +15,7 @@ On macOS, LightGBM also needs the OpenMP runtime: `brew install libomp`.
 
 download → clean → requests → iem → targets → features → baselines + flight_baselines → train → evaluate → failures → recommend → explain → dashboard
 
-`recommend.py` uses provisional thresholds until WP-D7.
+`recommend.py` uses the WP-D7 thresholds in a run's `calibration.json` (`uv run python -m airbus_challenge.calibrate --run <run_id>`), and labelled provisional thresholds when that file is missing.
 
 Development run, in order. `iem` runs before `targets` because the P12 exclusion audit reads METARs.
 
