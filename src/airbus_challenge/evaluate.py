@@ -1224,15 +1224,28 @@ def main(
     experiment: str = "primary",
     cohorts: list[str] | None = None,
     slices_path: Path | None = None,
+    release: bool = False,
 ) -> Path:
+    release_paths = None
+    if release:
+        if not locked_test:
+            raise ValueError("a frozen release is only used for the locked assessment")
+        from airbus_challenge.release import verify_frozen
+        frozen = verify_frozen(require_claim=True)
+        slot = frozen["experiments"][experiment]
+        if runs != [slot["run_id"]]:
+            raise ValueError("runs differ from the frozen experiment")
+        release_paths = (Path(slot["labels"]), Path(slot["requests"]))
+        labels_path = labels_path or release_paths[0]
+        requests_path = requests_path or release_paths[1]
     labels_path, requests_path = labels_path or LABELS, requests_path or REQUESTS
     slices_path = slices_path or SLICES
     artifacts, reports = artifacts or ARTIFACTS, reports or REPORTS
     ledger, mirror = ledger or LEDGER, mirror or LEDGER_MIRROR
     if locked_test:
         check_canonical(
-            labels=(labels_path, LABELS),
-            requests=(requests_path, REQUESTS),
+            labels=(labels_path, release_paths[0] if release_paths else LABELS),
+            requests=(requests_path, release_paths[1] if release_paths else REQUESTS),
             reports=(reports, REPORTS),
             ledger=(ledger, LEDGER),
             mirror=(mirror, LEDGER_MIRROR),
