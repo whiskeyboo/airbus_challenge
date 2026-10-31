@@ -18,3 +18,16 @@ cases:
     title: KDFW afternoon thunderstorm
     description: >-
       TS at DFW at 22Z on 2 Jun 2024; about 2 touchdowns against 77 scheduled.
+  - airport: KDFW
+    t: "2024-05-15T10:00:00Z"
+    title: KDFW routine weather, no alert
+    description: >-
+      Calm winds and 10-mile visibility at issue time. The combined model's
+      calibrated rules raise no alert; this is not a guarantee of normal operations.
+  - airport: KDFW
+    t: "2024-01-20T20:00:00Z"
+    title: KDFW stale weather report
+    description: >-
+      The latest usable METAR is over three hours old, so observation features are
+      blank. The existing model still supplies provisional degraded predictions;
+      do not present them as a validated missing-weather fallback.

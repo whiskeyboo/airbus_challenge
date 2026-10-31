@@ -1,0 +1,70 @@
+{
+  "checked_at_utc": "2026-10-31T09:30:50.374413+00:00",
+  "method": "Streamlit AppTest, real-data headless interaction",
+  "run_id": "lgbm_dev",
+  "data_mode": "real",
+  "results": [
+    {
+      "case": "normal",
+      "title": "DFW: next 12 hours from 15 May 2024, 10:00 UTC",
+      "cards": {
+        "Landings": "Normal",
+        "Departure delays": "Normal",
+        "Cancellations": "0.5%"
+      },
+      "outcomes_hidden_initially": true,
+      "rendered_without_exception": true,
+      "metar": "KDFW 150853Z 00000KT 10SM CLR 19/14 A2978 RMK AO2 SLP076 T01890139 55006",
+      "interaction_seconds": 0.887
+    },
+    {
+      "case": "bad_weather",
+      "title": "DFW: next 12 hours from 27 May 2024, 18:00 UTC",
+      "cards": {
+        "Landings": "Act",
+        "Departure delays": "Watch",
+        "Cancellations": "0.9%"
+      },
+      "outcomes_hidden_initially": true,
+      "rendered_without_exception": true,
+      "six_hour_prediction": 67.4,
+      "six_hour_schedule": 85.0,
+      "revealed_actual_arrivals": 4.0,
+      "outcomes_loaded_only_after_toggle": true,
+      "interaction_seconds": 1.279
+    },
+    {
+      "case": "missing_prediction",
+      "title": "ATL: next 12 hours from 11 Aug 2023, 08:00 UTC",
+      "cards": {},
+      "outcomes_hidden_initially": true,
+      "rendered_without_exception": true,
+      "forecast_missing_not_zero": true,
+      "weather_evidence_remains_visible": true,
+      "interaction_seconds": 0.285
+    },
+    {
+      "case": "stale_weather",
+      "title": "DFW: next 12 hours from 20 Jan 2024, 20:00 UTC",
+      "cards": {
+        "Landings": "Act",
+        "Departure delays": "Normal",
+        "Cancellations": "1.5%"
+      },
+      "outcomes_hidden_initially": true,
+      "rendered_without_exception": true,
+      "stale_weather_disclosed": true,
+      "existing_prediction_status": "degraded; fallback not validated",
+      "interaction_seconds": 0.844
+    }
+  ],
+  "elapsed_seconds": 4.572,
+  "scope": "2023/2024 replay only; no locked 2025 outcomes; no LLM/API request",
+  "human_rehearsal": "A person must still practise the spoken handoff; this record verifies app behavior.",
+  "source_sha256": {
+    "app/dashboard.py": "bd468c44e280bc6ff718700dfd11ec0816adc3a9c28ec77b2b535f6b04630ac4",
+    "app/cases.yaml": "35fab9faba364344d5d3b0b012b66b98523afd875f6a8fe35939a69277ed79e6",
+    "artifacts/lgbm_dev/calibration.json": "1dc3fd15a0224d00f86a7d6b67fd6a174e5bf4229c01dbfdda322a4df77d233b"
+  },
+  "saved_assessment_handling": "Dashboard recomputes from current run policy; older saved advisory rows are not shown as another current assessment."
+}
