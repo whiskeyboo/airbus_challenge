@@ -42,6 +42,15 @@ These are audit observations, not production assertions. Recompute them when imp
 
 Prefer provider documentation over third-party package assumptions. A package is optional; its successful installation does not prove its source downloader still works.
 
+## IEM parsed-column defects (found 2026-10-31)
+
+`iem.py` parses wind, sky and group validity from the raw METAR/TAF text, because IEM's parsed TAF columns are unreliable:
+- Variable wind (`VRB`) has null `sknt`, gusts on VRB winds are lost, and a missing gust is stored as 0.
+- `skyc`/`skyl` can add phantom layers (`OVC004` became two layers).
+- `fx_valid_end` mishandles hour 24 (`3119/3124` ended 18 days early); `is_amendment` is null on many KATL rows.
+- TAF raw text has no `TAF KATL ddhhmmZ ddhh/ddhh` header, so the bulletin end is derived (30 h from the cycle).
+- The archive keeps only corrected METAR text, so original send times of corrections are unknown (P13).
+
 ## Access-test record to produce
 
 For each source record: tested URL/parameters excluding credentials, UTC test time, status, request duration, response checksum, parser version, returned fields, station/time coverage, example validation results, retry behaviour, and any access limitation. A saved manual ZIP may support cached development, but does not prove automatic public ingestion.

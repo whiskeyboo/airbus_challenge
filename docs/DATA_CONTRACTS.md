@@ -126,6 +126,18 @@ Lineage is a separate long table:
 `feature_lineage(prediction_id, feature_name, source_record_id, contributing_available_at_utc, availability_basis, transform_version)`.
 Large rolling features can reference a hashed source partition and bounds if exact contributors remain reproducible.
 
+Until `prediction_requests` exists, `features.py` writes `data/interim/weather_features_airport_hour.parquet` and `weather_features_lineage_airport_hour.parquet`, keyed by `(airport_icao, as_of_utc, target_start_utc, horizon_h)`. Requests join on that key to gain `prediction_id`. Lineage there is per `feature_group` (the `FEATURES` registry maps features to groups); `metar_window` rows reference a sha256 of the sorted contributor ids.
+
+Weather `reason_codes` (policies in `docs/DECISIONS.md` P13-P15):
+
+| Code | Meaning | Effect |
+| --- | --- | --- |
+| `metar_stale` | Latest eligible METAR older than 3 h | METAR features null, status `partial` |
+| `metar_cor_skipped` | A corrected METAR would have been latest; the previous report was used | Features kept |
+| `taf_unavailable` | No bulletin available by T | TAF features null |
+| `taf_uncovered` | Target window ends after the chosen bulletin's end | TAF features null |
+| `taf_conflict_fallback` | Latest bulletin had conflicting versions; previous eligible one used | Features kept |
+
 ## 7. Labels
 
 Path: `data/labels/labels.parquet`.
