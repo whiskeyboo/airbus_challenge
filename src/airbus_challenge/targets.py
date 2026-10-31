@@ -187,11 +187,17 @@ def airport_hours(flights, icao, start, end, snapshot, complete=True):
                 )
                 .mask(out.coverage_status.eq("missing"), "missing_source_month")
             )
+            out[metric] = out[metric].where(out.throughput_label_eligible)
+            out["exclusion_reason"] = out.throughput_exclusion_reason
             month = selected.source_flight_date.str[:7]
             rates = invalid.groupby(month).mean()
-            out["month_degraded"] = (
-                out.hour_start_utc.dt.strftime("%Y-%m").map(rates).fillna(0).gt(0.01)
+            out["arrival_quarantine_fraction_month"] = (
+                out.hour_start_utc.dt.strftime("%Y-%m")
+                .map(rates)
+                .fillna(0)
+                .astype("float64")
             )
+            out["month_degraded"] = out.arrival_quarantine_fraction_month.gt(0.01)
     out["official_aar"] = pd.Series(float("nan"), index=out.index, dtype="float64")
     out["aar_source"] = pd.Series(pd.NA, index=out.index, dtype="string")
     out["aar_aggregation_version"] = pd.Series(pd.NA, index=out.index, dtype="string")
@@ -460,11 +466,23 @@ def build():
             "coverage_status": hourly.coverage_status.value_counts().to_dict(),
             "coverage_policy": "P12: n_resolved counts resolved arrivals; each unresolved arrival contributes once to every plausible UTC hour; unbounded dates use the full local service date plus resolved scheduled arrival hour; exclude labels only above 5% unresolved; source-month quarantine fraction above 1% flags degraded",
             "coverage_policy_status": "PROPOSED",
+            "arrival_month_quality": hourly.assign(
+                month=hourly.hour_start_utc.dt.strftime("%Y-%m")
+            )
+            .groupby(["airport_icao", "month"], as_index=False)
+            .agg(
+                quarantine_fraction=("arrival_quarantine_fraction_month", "max"),
+                degraded=("month_degraded", "any"),
+                excluded_hours=("throughput_label_eligible", lambda s: int((~s).sum())),
+            )
+            .to_dict(orient="records"),
             "source_scope": "BTS reporting-carrier flights with departure service months in the source manifest; excludes cancelled movements; diverted arrivals only when DivReachedDest=1",
             "capacity_ratio_status": "deferred pending P10 approval",
             "min_time_utc": start,
             "max_time_exclusive_utc": end,
-            "counts_by_airport": hourly.groupby("airport_icao")[list(METRICS)]
+            "counts_by_airport": hourly.groupby("airport_icao")[
+                [*METRICS, "n_resolved", "n_unresolved"]
+            ]
             .sum()
             .to_dict(),
             "null_counts": hourly[list(METRICS)].isna().sum().to_dict(),

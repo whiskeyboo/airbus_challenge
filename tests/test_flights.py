@@ -591,3 +591,43 @@ def test_overnight_audit_handles_unresolved_dst_with_nullable_strings():
         ]
     )
     assert overnight_rows(df).tolist() == [False, True]
+
+
+def test_missing_flight_number_is_identity_exception_not_timestamp_quarantine():
+    df = outcome_fixture([row(Flight_Number_Reporting_Airline=None)])
+    from airbus_challenge.clean import mark_sample
+    from airbus_challenge.targets import airport_hours
+
+    r = mark_sample(df, df.flight_key).iloc[0]
+    assert pd.isna(r.flight_number)
+    assert not r.in_provided_csv
+    assert "missing_flight_number" in r.quality_flags
+    assert r.timestamp_status == "valid"
+    assert r.flight_id != outcome_fixture([row()]).iloc[0].flight_id
+    hourly = airport_hours(
+        df,
+        "KDFW",
+        pd.Timestamp("2023-01-15T17:00Z"),
+        pd.Timestamp("2023-01-15T18:00Z"),
+        "fixture",
+    )
+    assert hourly.iloc[0].n_resolved == 1
+    assert hourly.iloc[0].n_unresolved == 0
+
+
+def test_ineligible_hour_retains_resolved_count_but_null_target():
+    from airbus_challenge.targets import airport_hours
+
+    df = outcome_fixture([row()])
+    df["timestamp_status"] = "quarantined"
+    h = airport_hours(
+        df,
+        "KDFW",
+        pd.Timestamp("2023-01-15T17:00Z"),
+        pd.Timestamp("2023-01-15T18:00Z"),
+        "fixture",
+    ).iloc[0]
+    assert h.n_resolved == 0
+    assert h.n_unresolved == 1
+    assert pd.isna(h.reporting_carrier_touchdowns)
+    assert h.exclusion_reason == "unresolved_arrival_fraction_gt_0.05"

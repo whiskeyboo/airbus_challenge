@@ -13,7 +13,7 @@ import yaml
 RAW = Path("data/raw")
 OUTPUT = Path("data/processed/flights.parquet")
 TOLERANCE_MIN = 2  # PROPOSED: integrator approval required before production use.
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 KEY = [
     "FlightDate",
     "DOT_ID_Reporting_Airline",
@@ -54,11 +54,13 @@ def digest(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
-def flight_keys(raw: pd.DataFrame) -> pd.Series:
+def flight_keys(raw: pd.DataFrame, allow_missing_flight_number=False) -> pd.Series:
     fields = raw[KEY].copy()
     fields["FlightDate"] = fields.FlightDate.str[:10]
     for c in [KEY[1], KEY[2], KEY[5]]:
         fields[c] = pd.to_numeric(fields[c]).astype("Int64").astype("string")
+    if allow_missing_flight_number:
+        fields[KEY[2]] = fields[KEY[2]].fillna("<missing-flight-number>")
     if fields.isna().any().any():
         raise ValueError("Missing required flight key component")
     parts = fields.astype(str)
@@ -130,7 +132,7 @@ def flights(raw: pd.DataFrame, config: dict, src: dict) -> pd.DataFrame:
     raw = raw.copy()
     mapping = airport_map(set(raw.Origin) | set(raw.Dest), config)
     df = pd.DataFrame(index=raw.index)
-    keys = flight_keys(raw)
+    keys = flight_keys(raw, allow_missing_flight_number=True)
     df["flight_key"] = keys
     df["source_row_hash"] = pd.Series(
         [
@@ -147,6 +149,10 @@ def flights(raw: pd.DataFrame, config: dict, src: dict) -> pd.DataFrame:
         duplicates, ""
     )
     df["flight_id"] = (keys + "|duplicates-v1" + suffix).map(digest)
+    missing_number = raw[KEY[2]].isna()
+    df.loc[missing_number, "flight_id"] = df.loc[
+        missing_number, "source_record_id"
+    ].map(lambda r: digest("missing-flight-number|" + r))
     df["carrier_id"] = pd.to_numeric(raw[KEY[1]]).astype("Int64").astype("string")
     df["flight_number"] = pd.to_numeric(raw[KEY[2]]).astype("Int64").astype("string")
     df["source_flight_date"] = raw.FlightDate.str[:10].astype("string")
@@ -154,7 +160,7 @@ def flights(raw: pd.DataFrame, config: dict, src: dict) -> pd.DataFrame:
         df[f"{field}_icao"] = raw[col].map(lambda c: mapping[c][0]).astype("string")
         df[f"{field}_timezone"] = raw[col].map(lambda c: mapping[c][1]).astype("string")
     num = raw[CLOCKS + DURATIONS + ["Cancelled", "Diverted"]].apply(pd.to_numeric)
-    flags = {}
+    flags = {"missing_flight_number": missing_number}
     df["scheduled_dep_utc"], dst = local_departure(
         raw.FlightDate, raw.CRSDepTime, df.origin_timezone
     )
@@ -240,7 +246,11 @@ def flights(raw: pd.DataFrame, config: dict, src: dict) -> pd.DataFrame:
     table = pd.DataFrame(flags).fillna(False).astype(bool)
     df["quality_flags"] = [list(table.columns[r]) for r in table.to_numpy()]
     quarantine = table.drop(
-        columns=["diverted_partial_path", "cancelled_partial_path"]
+        columns=[
+            "diverted_partial_path",
+            "cancelled_partial_path",
+            "missing_flight_number",
+        ]
     ).any(axis=1)
     df["timestamp_status"] = (
         pd.Series("valid", index=df.index)
@@ -286,7 +296,7 @@ def flights(raw: pd.DataFrame, config: dict, src: dict) -> pd.DataFrame:
 
 
 def mark_sample(df, sample_keys):
-    df["in_provided_csv"] = df.flight_key.isin(sample_keys)
+    df["in_provided_csv"] = df.flight_key.isin(sample_keys) & df.flight_number.notna()
     return df
 
 
@@ -369,6 +379,8 @@ def build():
         "quality_flag_counts": Counter(),
         "timezone_coverage": {},
         "samples": {},
+        "identity_exceptions": [],
+        "missing_flight_number_policy": "Approved exception: null flight_number; flight_id=sha256(missing-flight-number|source_record_id); identity flag alone does not quarantine timestamps or make an arrival unresolved",
     }
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     tmp = OUTPUT.with_name(".flights.parquet.tmp")
@@ -398,11 +410,30 @@ def build():
                         or c.startswith("Div")
                     ),
                 )
-            all_keys = flight_keys(raw)
+            all_keys = flight_keys(raw[raw[KEY].notna().all(axis=1)])
             matches.update(all_keys[all_keys.isin(sample_keys)])
             iatas = [a["iata"] for a in config["airports"].values()]
             raw = raw[raw.Origin.isin(iatas) | raw.Dest.isin(iatas)]
             df = mark_sample(flights(raw, config, src), sample_keys)
+            exceptions = df[df.flight_number.isna()]
+            report["identity_exceptions"].extend(
+                exceptions[
+                    [
+                        "flight_id",
+                        "source_record_id",
+                        "source_flight_date",
+                        "carrier_id",
+                        "origin_icao",
+                        "dest_icao",
+                        "scheduled_dep_utc",
+                        "timestamp_status",
+                    ]
+                ].to_dict(orient="records")
+            )
+            if len(report["identity_exceptions"]) > 1:
+                raise ValueError(
+                    f"Additional missing-flight-number records need review: {report['identity_exceptions']}"
+                )
             scoped_matches.update(df.flight_key[df.in_provided_csv])
             table = pa.Table.from_pandas(df, preserve_index=False)
             # Empty flag lists must retain a stable list<string> across partitions.
@@ -481,6 +512,9 @@ def build():
             "study_airport_unmatched_rows": int(scope_counts.eq(0).sum()),
             "study_airport_multiply_matched_rows": int(scope_counts.gt(1).sum()),
             "rows": len(sample),
+            "bts_rows_unmatchable_missing_flight_number": len(
+                report["identity_exceptions"]
+            ),
             "matched_rows": int(counts.gt(0).sum()),
             "match_rate": float(counts.gt(0).mean()),
             "unmatched_rows": int(counts.eq(0).sum()),
